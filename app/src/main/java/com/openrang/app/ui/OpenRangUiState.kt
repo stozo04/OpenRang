@@ -8,4 +8,5 @@ sealed interface OpenRangUiState {
     object Recording : OpenRangUiState
     object Processing : OpenRangUiState
     data class LoopingPreview(val videoPath: String, val playbackSpeed: Float) : OpenRangUiState
+    object Gallery : OpenRangUiState
 }
