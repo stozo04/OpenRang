@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openrang.app.camera.CameraManager
 import com.openrang.app.ui.CameraScreen
+import com.openrang.app.ui.GalleryScreen
 import com.openrang.app.ui.OnboardingScreen
 import com.openrang.app.ui.OpenRangUiState
 import com.openrang.app.ui.OpenRangViewModel
@@ -109,6 +110,12 @@ class MainActivity : ComponentActivity() {
                             PreviewScreen(
                                 videoPath = state.videoPath,
                                 onBackToCaptureClick = { viewModel.resetToCapture() }
+                            )
+                        }
+                        is OpenRangUiState.Gallery -> {
+                            GalleryScreen(
+                                viewModel = viewModel,
+                                onBackClick = { viewModel.navigateBackFromGallery() }
                             )
                         }
                         else -> {
