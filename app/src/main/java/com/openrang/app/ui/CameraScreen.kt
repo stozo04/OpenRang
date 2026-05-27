@@ -276,4 +276,3 @@ fun CameraScreen(
         }
     }
 }
-
