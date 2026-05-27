@@ -13,8 +13,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import androidx.camera.video.VideoRecordEvent
+import android.media.MediaMetadataRetriever
+import android.graphics.Bitmap
+
+data class RecordedVideo(
+    val id: Long,
+    val videoPath: String,
+    val thumbnailPath: String
+)
 
 class OpenRangViewModel : ViewModel() {
+
     // Start with the beautiful Onboarding Carousel
     private val _uiState = MutableStateFlow<OpenRangUiState>(OpenRangUiState.Onboarding)
     val uiState: StateFlow<OpenRangUiState> = _uiState.asStateFlow()
@@ -32,6 +41,9 @@ class OpenRangViewModel : ViewModel() {
     }
 
     private var recordingJob: Job? = null
+
+    private val _recordedVideos = MutableStateFlow<List<RecordedVideo>>(emptyList())
+    val recordedVideos: StateFlow<List<RecordedVideo>> = _recordedVideos.asStateFlow()
 
     fun startBurstCapture(context: Context, cameraManager: CameraManager) {
         if (_uiState.value != OpenRangUiState.ReadyToCapture) return
@@ -54,10 +66,13 @@ class OpenRangViewModel : ViewModel() {
                             Log.e("OpenRangViewModel", "Video burst recording failed: ${event.error}")
                             _uiState.value = OpenRangUiState.ReadyToCapture
                         } else {
-                            Log.d("OpenRangViewModel", "Video burst recording finalized successfully: ${outputFile.length()} bytes")
-                            // Transition to LoopingPreview state for verification in Phase 2
+                            val savedFile = saveFinalizedVideo(context, outputFile)
+                            val finalPath = savedFile?.absolutePath ?: outputFile.absolutePath
+                            Log.d("OpenRangViewModel", "Video burst recording finalized successfully: $finalPath")
+                            
+                            // Transition to LoopingPreview state for verification
                             _uiState.value = OpenRangUiState.LoopingPreview(
-                                videoPath = outputFile.absolutePath,
+                                videoPath = finalPath,
                                 playbackSpeed = 1.5f
                             )
                         }
@@ -74,6 +89,106 @@ class OpenRangViewModel : ViewModel() {
             Log.e("OpenRangViewModel", "Failed to start burst capture", e)
             _uiState.value = OpenRangUiState.ReadyToCapture
         }
+    }
+
+    private fun saveFinalizedVideo(context: Context, tempFile: File): File? {
+        val timestamp = System.currentTimeMillis()
+        val videoDir = File(context.filesDir, "videos").apply { mkdirs() }
+        val thumbDir = File(context.filesDir, "thumbnails").apply { mkdirs() }
+
+        val destVideo = File(videoDir, "clip_$timestamp.mp4")
+        val destThumb = File(thumbDir, "clip_$timestamp.jpg")
+
+        return try {
+            tempFile.copyTo(destVideo, overwrite = true)
+
+            // Extract thumbnail using MediaMetadataRetriever
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(destVideo.absolutePath)
+            val bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            if (bitmap != null) {
+                destThumb.outputStream().use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                }
+            }
+            retriever.release()
+            destVideo
+        } catch (e: Exception) {
+            Log.e("OpenRangViewModel", "Failed to save video loop persistent copy", e)
+            null
+        }
+    }
+
+    fun loadRecordedVideos(context: Context) {
+        val videoDir = File(context.filesDir, "videos")
+        val thumbDir = File(context.filesDir, "thumbnails")
+
+        if (!videoDir.exists()) {
+            _recordedVideos.value = emptyList()
+            return
+        }
+
+        val files = videoDir.listFiles { _, name -> name.startsWith("clip_") && name.endsWith(".mp4") }
+        if (files == null) {
+            _recordedVideos.value = emptyList()
+            return
+        }
+
+        val list = files.mapNotNull { file ->
+            val name = file.name
+            val timestampStr = name.removePrefix("clip_").removeSuffix(".mp4")
+            val id = timestampStr.toLongOrNull() ?: 0L
+
+            val thumbFile = File(thumbDir, "clip_$timestampStr.jpg")
+            if (thumbFile.exists()) {
+                RecordedVideo(id, file.absolutePath, thumbFile.absolutePath)
+            } else {
+                // If thumbnail doesn't exist, extract it now on demand!
+                try {
+                    thumbDir.mkdirs()
+                    val retriever = MediaMetadataRetriever()
+                    retriever.setDataSource(file.absolutePath)
+                    val bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    if (bitmap != null) {
+                        thumbFile.outputStream().use { out ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                        }
+                    }
+                    retriever.release()
+                    RecordedVideo(id, file.absolutePath, thumbFile.absolutePath)
+                } catch (e: Exception) {
+                    Log.e("OpenRangViewModel", "Failed to extract on-demand thumbnail for ${file.name}", e)
+                    null
+                }
+            }
+        }.sortedByDescending { it.id } // Newest first
+
+        _recordedVideos.value = list
+    }
+
+    fun deleteVideo(context: Context, video: RecordedVideo) {
+        try {
+            val videoFile = File(video.videoPath)
+            if (videoFile.exists()) {
+                videoFile.delete()
+            }
+            val thumbFile = File(video.thumbnailPath)
+            if (thumbFile.exists()) {
+                thumbFile.delete()
+            }
+            loadRecordedVideos(context)
+        } catch (e: Exception) {
+            Log.e("OpenRangViewModel", "Failed to delete video ${video.id}", e)
+        }
+    }
+
+    fun navigateToGallery(context: Context) {
+        _uiState.value = OpenRangUiState.Gallery
+        loadRecordedVideos(context)
+    }
+
+    fun navigateBackFromGallery() {
+        _uiState.value = OpenRangUiState.ReadyToCapture
     }
 
     fun stopBurstCapture(cameraManager: CameraManager) {

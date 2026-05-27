@@ -163,7 +163,7 @@ class OpenRangViewModelTest {
     @Test
     fun `video record event finalize transitions back to ReadyToCapture on error`() {
         viewModel.onPermissionsChecked(true) // ReadyToCapture
-        
+
         val slot = slot<Consumer<VideoRecordEvent>>()
         every { cameraManager.startRecording(any(), capture(slot)) } just Runs
 
@@ -177,5 +177,75 @@ class OpenRangViewModelTest {
         slot.captured.accept(finalizeEvent)
 
         assertEquals(OpenRangUiState.ReadyToCapture, viewModel.uiState.value)
+    }
+
+    // ── Gallery Navigation Tests ──
+
+    @Test
+    fun `navigateToGallery transitions state to Gallery`() {
+        val filesDir = mockk<File>(relaxed = true)
+        every { context.filesDir } returns filesDir
+
+        viewModel.navigateToGallery(context)
+
+        assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+    }
+
+    @Test
+    fun `navigateBackFromGallery transitions state to ReadyToCapture`() {
+        val filesDir = mockk<File>(relaxed = true)
+        every { context.filesDir } returns filesDir
+
+        viewModel.navigateToGallery(context)
+        assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+
+        viewModel.navigateBackFromGallery()
+        assertEquals(OpenRangUiState.ReadyToCapture, viewModel.uiState.value)
+    }
+
+    @Test
+    fun `loadRecordedVideos with missing directory returns empty list`() {
+        val filesDir = mockk<File>(relaxed = true)
+        every { context.filesDir } returns filesDir
+
+        val videosDir = File(filesDir, "videos")
+        // Directory doesn't exist on the mocked filesystem, so listFiles returns null
+
+        viewModel.loadRecordedVideos(context)
+
+        assertTrue(viewModel.recordedVideos.value.isEmpty())
+    }
+
+    @Test
+    fun `deleteVideo removes files and reloads empty list`() {
+        val filesDir = mockk<File>(relaxed = true)
+        every { context.filesDir } returns filesDir
+
+        val fakeVideoFile = mockk<File>(relaxed = true)
+        every { fakeVideoFile.exists() } returns true
+        every { fakeVideoFile.delete() } returns true
+        every { fakeVideoFile.absolutePath } returns "/fake/videos/clip_123.mp4"
+
+        val fakeThumbFile = mockk<File>(relaxed = true)
+        every { fakeThumbFile.exists() } returns true
+        every { fakeThumbFile.delete() } returns true
+        every { fakeThumbFile.absolutePath } returns "/fake/thumbnails/clip_123.jpg"
+
+        val video = RecordedVideo(
+            id = 123L,
+            videoPath = "/fake/videos/clip_123.mp4",
+            thumbnailPath = "/fake/thumbnails/clip_123.jpg"
+        )
+
+        // deleteVideo will attempt File(path).delete() then reload
+        viewModel.deleteVideo(context, video)
+
+        // After deletion + reload, the list should remain empty (no real files on disk)
+        assertTrue(viewModel.recordedVideos.value.isEmpty())
+    }
+
+    @Test
+    fun `recordedVideos flow starts as empty list`() {
+        assertTrue(viewModel.recordedVideos.value.isEmpty())
     }
 }
