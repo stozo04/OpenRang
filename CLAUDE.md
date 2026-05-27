@@ -55,6 +55,7 @@ When operating in a specific subfolder that has its own CLAUDE.md, respect that 
 | UI | Jetpack Compose | BOM 2024.02.02 |
 | Camera | AndroidX CameraX | 1.3.1 |
 | Media | AndroidX Media3 (ExoPlayer, Transformer) | 1.3.0 |
+| Preferences | Jetpack DataStore (Preferences) | 1.0.0 |
 | Build | Gradle 8.3.2, AGP 8.3.2 | — |
 | Target | compileSdk 34, minSdk 26, targetSdk 34 | — |
 
@@ -64,14 +65,17 @@ When operating in a specific subfolder that has its own CLAUDE.md, respect that 
 com.openrang.app/
 ├── camera/
 │   └── CameraManager.kt         # CameraX lifecycle, recording, lens toggle
+├── data/
+│   ├── UserPreferencesRepository.kt    # Interface: Flow-based preference reads + suspend writes
+│   └── UserPreferencesRepositoryImpl.kt # DataStore wrapper + Context.dataStore singleton
 ├── ui/
-│   ├── OpenRangUiState.kt       # Sealed interface: state machine
-│   ├── OpenRangViewModel.kt     # MVVM hub: state, video storage, navigation
+│   ├── OpenRangUiState.kt       # Sealed interface: state machine (incl. Initializing)
+│   ├── OpenRangViewModel.kt     # MVVM hub: state, video storage, navigation, preferences
 │   ├── CameraScreen.kt          # Live viewfinder, shutter, home button
 │   ├── OnboardingScreen.kt      # 3-page carousel, animations, ArrowIcons
 │   ├── PreviewScreen.kt         # Full-screen looping ExoPlayer preview
 │   └── GalleryScreen.kt         # 3-col grid, thumbnails, delete, video overlay
-├── MainActivity.kt              # Permissions, state routing, theme
+├── MainActivity.kt              # Permissions, state routing, theme, ViewModelFactory
 └── (planned)
     └── media/
         └── VideoProcessor.kt    # Media3 Transformer: reversal, concat, speed burn-in
@@ -80,19 +84,19 @@ com.openrang.app/
 ### State Machine
 
 ```
-Onboarding → CheckingPermissions → ReadyToCapture ↔ Recording
-                                  ↕                      ↓
-                               Gallery            LoopingPreview
-                                  ↕
-                            ReadyToCapture
+Initializing → Onboarding → CheckingPermissions → ReadyToCapture ↔ Recording
+           ↘                 ↕                      ↓
+        CheckingPermissions  Gallery            LoopingPreview
+         (returning user)      ↕
+                          ReadyToCapture
 ```
 
-States are modeled as a sealed interface (`OpenRangUiState`) and driven by `MutableStateFlow<OpenRangUiState>` in the ViewModel. Navigation is conditional composable routing in `MainActivity.kt`.
+States are modeled as a sealed interface (`OpenRangUiState`) and driven by `MutableStateFlow<OpenRangUiState>` in the ViewModel. `Initializing` reads DataStore to decide the first real screen. Navigation is conditional composable routing in `MainActivity.kt`.
 
 ### Design System
 
 | Token | Value | Usage |
-|-------|-------|-------|
+|-------|-------|------|
 | `NeonCoral` | `#FF5252` | Primary accent, shutter, gradients |
 | `NeonPurple` | `#7C4DFF` | Secondary accent, gradients |
 | `GlassWhite` | `#33FFFFFF` | Glassmorphic backgrounds |
@@ -122,6 +126,7 @@ Videos are saved to `context.filesDir/videos/clip_<timestamp>.mp4`. Thumbnails (
 - **Page data is a data class** (`OnboardingPage`) — titles, drawables, and glow colors are a list, not scattered `when` branches.
 - **Video storage uses `filesDir` not `cacheDir`** — gallery videos are persistent, not temporary.
 - **Thumbnail caching is eager + lazy fallback** — extracted at save time, re-extracted on demand if missing.
+- **Jetpack DataStore for user preferences** — Preferences DataStore via repository pattern (`UserPreferencesRepository` interface). ViewModel takes the repository via constructor injection + `ViewModelProvider.Factory`. IOException caught with safe fallback (show onboarding again). Top-level `Context.dataStore` singleton delegate per Google's mandate.
 
 ### Git Workflow
 
@@ -130,8 +135,9 @@ Branch naming: `feature/<short-description>`. PR template at `.github/pull_reque
 ## Reference Documents
 
 | Document | Purpose |
-|----------|--------|
+|----------|---------|
 | `PRD-mission-control.md` | **Authoritative architecture and component specs.** Read before any structural change. |
+| `docs/ANDROID_STANDARDS.md` | **Google Android best practices.** Non-negotiable standards with links to official specs. Consult before introducing new patterns or libraries. |
 | `docs/active/IMPLEMENTATION_PLAN.md` | Phase-by-phase technical blueprint for the core "Loop" feature. |
 | `README.md` | Public-facing project overview. |
 | `.github/pull_request_template.md` | PR checklist and conventions. |
@@ -147,7 +153,8 @@ Branch naming: `feature/<short-description>`. PR template at `.github/pull_reque
 - Looping preview (ExoPlayer, `REPEAT_MODE_ALL`)
 - Gallery grid with delete and full-screen playback overlay
 - Home/gallery navigation from camera screen
-- Unit tests (16) + UI regression tests (6)
+- Jetpack DataStore: onboarding persistence, repository pattern, ViewModel factory injection
+- Unit tests (19) + UI regression tests (6)
 
 ### Remaining (per IMPLEMENTATION_PLAN.md)
 
