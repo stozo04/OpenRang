@@ -20,6 +20,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import com.openrang.app.R
+
+
+
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -149,27 +155,20 @@ fun CameraScreen(
                 .statusBarsPadding()
                 .padding(top = 12.dp, bottom = 16.dp)
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "🪃 OPENRANG",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White,
-                    letterSpacing = 4.sp,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = if (isRecording) "RECORDING BURST..." else "TAP TO LOOP",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = NeonCoral,
-                    letterSpacing = 2.sp,
-                    textAlign = TextAlign.Center
-                )
+            if (isRecording) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "RECORDING BURST...",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonCoral,
+                        letterSpacing = 2.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -266,98 +265,14 @@ fun CameraScreen(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    CameraFlipIcon(
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_flip_camera),
+                        contentDescription = "Flip Camera",
                         modifier = Modifier.size(28.dp),
-                        color = Color.White
+                        tint = Color.White
                     )
                 }
             }
         }
     }
 }
-
-@Composable
-fun CameraFlipIcon(modifier: Modifier = Modifier, color: Color = Color.White) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val strokeWidth = 3.dp.toPx()
-        val r = w * 0.33f
-        val cx = w / 2f
-        val cy = h / 2f
-
-        // 1. Draw top arc (from 195 deg to 345 deg)
-        drawArc(
-            color = color,
-            startAngle = 195f,
-            sweepAngle = 150f,
-            useCenter = false,
-            topLeft = Offset(cx - r, cy - r),
-            size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = strokeWidth,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round
-            )
-        )
-
-        // 2. Draw bottom arc (from 15 deg to 165 deg)
-        drawArc(
-            color = color,
-            startAngle = 15f,
-            sweepAngle = 150f,
-            useCenter = false,
-            topLeft = Offset(cx - r, cy - r),
-            size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = strokeWidth,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round
-            )
-        )
-
-        // 3. Arrowheads
-        val arrowLength = 5.5.dp.toPx()
-
-        // Top-Right Arrowhead (at 345 deg)
-        val angle1 = 345f * (Math.PI / 180f)
-        val ex1 = cx + (r * Math.cos(angle1)).toFloat()
-        val ey1 = cy + (r * Math.sin(angle1)).toFloat()
-
-        // Vertical line down, Horizontal line left
-        drawLine(
-            color = color,
-            start = Offset(ex1, ey1),
-            end = Offset(ex1 - arrowLength, ey1),
-            strokeWidth = strokeWidth,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(ex1, ey1),
-            end = Offset(ex1, ey1 + arrowLength),
-            strokeWidth = strokeWidth,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-
-        // Bottom-Left Arrowhead (at 165 deg)
-        val angle2 = 165f * (Math.PI / 180f)
-        val ex2 = cx + (r * Math.cos(angle2)).toFloat()
-        val ey2 = cy + (r * Math.sin(angle2)).toFloat()
-
-        // Vertical line up, Horizontal line right
-        drawLine(
-            color = color,
-            start = Offset(ex2, ey2),
-            end = Offset(ex2 + arrowLength, ey2),
-            strokeWidth = strokeWidth,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(ex2, ey2),
-            end = Offset(ex2, ey2 - arrowLength),
-            strokeWidth = strokeWidth,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-    }
-}
-
