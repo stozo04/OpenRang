@@ -200,13 +200,17 @@ fun CameraScreen(
                     )
                 }
 
-                // Switch Camera / Lens Toggle Button
+                // Switch Camera / Lens Toggle Button (Sleek Glowing Neon Gradient!)
                 Box(
                     modifier = Modifier
                         .size(54.dp)
                         .clip(CircleShape)
-                        .background(GlassWhite)
-                        .border(1.dp, GlassWhiteBorder, CircleShape)
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(NeonCoral, NeonPurple)
+                            )
+                        )
+                        .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
                         .clickable {
                             cameraManager.toggleCamera(lifecycleOwner, previewView)
                         },
