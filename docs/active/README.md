@@ -38,4 +38,4 @@ docs/active/
 |---------|--------|--------|
 | Loop Generation (Media3 Transformer) | `loop-generation` | Planned — core feature, not yet started |
 
-> Now in `docs/completed/`: Target SDK Upgrade + Android 16 Doc-Prep (combined — Issue #7, PRs #13 & #15), Jetpack DataStore Preferences (PR #5), and Permission Rationale Flow (PR #12).
+> Now in `docs/completed/`: VideoStorageRepository / remove Context from ViewModel (Issue #10, PR #17), Target SDK Upgrade + Android 16 Doc-Prep (combined — Issue #7, PRs #13 & #15), Jetpack DataStore Preferences (PR #5), and Permission Rationale Flow (PR #12).
