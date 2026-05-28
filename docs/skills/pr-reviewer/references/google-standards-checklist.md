@@ -83,7 +83,23 @@ standards.
 
 ---
 
-## 6. Kotlin Coroutines & Flow
+## 6. Media & Audio (ExoPlayer / Media3)
+
+**Source:** https://developer.android.com/media/media3/exoplayer
+
+- [ ] ExoPlayer instance released in `onDestroy()` or `DisposableEffect` (prevents memory leaks)
+- [ ] `REPEAT_MODE_ALL` used correctly for looping playback
+- [ ] Player state saved/restored across configuration changes (rotation, etc.)
+- [ ] Audio focus handled correctly (pause on interruption, duck or pause for notifications)
+- [ ] `RECORD_AUDIO` permission checked before any audio capture
+- [ ] Media3 Transformer operations run off the main thread
+- [ ] Temporary media files cleaned up after processing (cacheDir not accumulating)
+
+**Source:** https://developer.android.com/media/media3
+
+---
+
+## 7. Kotlin Coroutines & Flow
 
 **Source:** https://developer.android.com/kotlin/coroutines/coroutines-best-practices
 
@@ -98,7 +114,7 @@ standards.
 
 ---
 
-## 7. Testing
+## 8. Testing
 
 **Source:** https://developer.android.com/training/testing/fundamentals
 
@@ -115,7 +131,7 @@ standards.
 
 ---
 
-## 8. Accessibility
+## 9. Accessibility
 
 **Source:** https://developer.android.com/guide/topics/ui/accessibility
 
@@ -132,7 +148,7 @@ standards.
 
 ---
 
-## 9. Google Play Store Readiness
+## 10. Google Play Store Readiness
 
 **Source:** https://developer.android.com/google/play/requirements/target-sdk
 
@@ -149,7 +165,7 @@ standards.
 
 ---
 
-## 10. Latest Android Version Behavior Changes
+## 11. Latest Android Version Behavior Changes
 
 **Source:** https://developer.android.com/about/versions (check latest stable)
 

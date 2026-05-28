@@ -86,8 +86,20 @@ Once you have the PR:
 
 ## Phase 4: Review the Code
 
-Go through every changed file and evaluate against the checklist in
-`references/google-standards-checklist.md`.
+Review the **full codebase**, not just the diff. The diff tells you what changed, but
+standards compliance applies to the whole project. Use `get_file_contents` to read the
+complete source of every file in the `app/src/main/` tree — especially files the PR
+touches, but also files it depends on or affects.
+
+Evaluate against **every category** in `references/google-standards-checklist.md`. This is
+a camera app — CameraX, Media/Audio, Accessibility, and Permissions are always relevant,
+even if the PR doesn't directly touch those files. A DataStore PR that changes the ViewModel
+startup flow can break permission timing. A new state can expose an accessibility gap in a
+screen that wasn't modified.
+
+**Every category must appear in the summary table.** If a category has no findings, mark it
+as PASS with a brief note confirming what was checked. Never skip a category or leave a row
+blank.
 
 **How to review well:**
 
@@ -102,6 +114,12 @@ Go through every changed file and evaluate against the checklist in
   thorough destroys trust.
 - **Context over rules.** A 46dp touch target on a secondary button in a developer tool
   is different from a 46dp touch target on the main CTA of a consumer app. Use judgment.
+- **Cross-cutting concerns.** Always check these regardless of what the PR changes:
+  - **CameraX** — lifecycle binding, use cases, executor shutdown
+  - **Media/Audio** — ExoPlayer lifecycle, audio permission handling, Media3 usage
+  - **Accessibility** — touch targets, contrast ratios, content descriptions on ALL screens
+  - **Permissions** — rationale flow, graceful degradation, permanent denial handling
+  - **Play Store** — targetSdk deadline, app quality signals
 
 ---
 
@@ -168,11 +186,17 @@ Optional improvements that would raise code quality.
 | Permissions | | | | |
 | Compose | | | | |
 | CameraX | | | | |
+| Media & Audio | | | | |
 | Coroutines | | | | |
 | Testing | | | | |
 | Accessibility | | | | |
 | Play Store | | | | |
+| Android Version | | | | |
 | **Total** | | | | |
+
+**Every row must be filled.** If a category has no findings, enter the PASS count with a
+zero for the rest. Never leave a row blank or omit a category — the developer needs to see
+that every area was checked, not just the ones with issues.
 
 ### Verdict
 
