@@ -20,6 +20,7 @@ Each lesson follows the same shape:
 | 005 | [Track current Play Store target API level requirements](./005-play-store-target-api-level.md) | PR #5 |
 | 006 | [Always show permission rationale before re-requesting](./006-permission-rationale-flow.md) | PR #5 |
 | 007 | [A standards doc and the code in the same PR must agree](./007-standards-doc-must-match-code.md) | PR #5 |
+| 008 | [JVM unit tests: real temp dirs for File, one shared TestDispatcher](./008-jvm-test-file-and-dispatcher-pitfalls.md) | Issue #11 |
 
 ## Adding a new lesson
 

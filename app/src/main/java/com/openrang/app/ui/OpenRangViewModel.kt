@@ -65,6 +65,20 @@ class OpenRangViewModel(
         }
     }
 
+    /** User denied a required permission once; show the educational rationale screen. */
+    fun showPermissionRationale() {
+        _uiState.value = OpenRangUiState.PermissionRationale
+    }
+
+    /**
+     * User acknowledged the rationale. Return to [OpenRangUiState.CheckingPermissions] so the
+     * permission flow has a single source of truth; MainActivity then launches the system dialog
+     * directly to avoid re-entering the rationale branch (see MainActivity.checkPermissions).
+     */
+    fun onRationaleAcknowledged() {
+        _uiState.value = OpenRangUiState.CheckingPermissions
+    }
+
     private var recordingJob: Job? = null
 
     private val _recordedVideos = MutableStateFlow<List<RecordedVideo>>(emptyList())
