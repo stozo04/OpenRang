@@ -1,8 +1,8 @@
 # 007 — Target SDK Upgrade (Android 14 → Android 16) for Google Play
 
 **GitHub Issue:** [#7 — Upgrade targetSdk to meet Google Play requirements](https://github.com/stozo04/OpenRang/issues/7)
-**Branch:** implementation lands on a dedicated future branch. The current `feature/update-api` branch is **docs-prep only** (see [android-16-doc-prep](../android-16-doc-prep/IMPLEMENTATION.md)) — no build or code changes happen there.
-**Status:** PLANNING — awaiting sign-off before any build-file changes. Behavior-change research is captured in the [Android 16 hub](../../android-16/README.md).
+**Branch:** implementation landed on `feature/target-sdk-36` (PR #15). The docs-prep that preceded it shipped on `feature/update-api` (PR #13) — see the [doc-prep record](./DOC-PREP.md), now archived in this same folder.
+**Status:** IMPLEMENTED on branch `feature/target-sdk-36` — ready for review. Build (debug + release/R8) is green, unit (24) + instrumented (10) tests pass, and native libs verified 16 KB-aligned. On-device ≥600dp large-screen visual pass still recommended (see "Implementation outcome" below). Behavior-change research is captured in the [Android 16 hub](../../android-16/README.md).
 **Last updated:** 2026-05-28
 
 ---
@@ -162,7 +162,7 @@ absorb both the 34→35 and 35→36 behavior changes in one pass.
 - [ ] Close issue #7.
 - [ ] **Final step — reconcile the docs with the shipped code.** Once the build actually targets 36, sort every affected doc reference into one of two buckets:
   - **Flip (normative — these state *current* status):** `docs/ANDROID_STANDARDS.md` §8 OpenRang status note + the four §11 `Status: pending — Issue #7` markers → mark satisfied or remove; `CLAUDE.md` (Tech Stack table + SDK status note) and `README.md` (SDK levels) → change 34 → 36. This is the convergence step that keeps docs and code in agreement ([Lesson 007](../../lessons_learned/007-standards-doc-must-match-code.md)).
-  - **Keep (provenance — these record what was *planned/done*):** this file, [`android-16-doc-prep/IMPLEMENTATION.md`](../android-16-doc-prep/IMPLEMENTATION.md), and the [`docs/android-16/`](../../android-16/README.md) hub. Leave their Issue #7 / "pending" history intact — that's correct linkage, not stale debt to scrub.
+  - **Keep (provenance — these record what was *planned/done*):** this file, [`DOC-PREP.md`](./DOC-PREP.md), and the [`docs/android-16/`](../../android-16/README.md) hub. Leave their Issue #7 / "pending" history intact — that's correct linkage, not stale debt to scrub.
   - The source of truth for the version numbers stays `app/build.gradle.kts`; the docs only echo it, so there are just a handful of echoes to update — all listed above.
 
 ---
@@ -185,3 +185,18 @@ will get an explicit "proceed" before execution per the project reversibility pr
 - 16 KB page sizes — developer.android.com/guide/practices/page-sizes
 - Versions — Google Maven metadata (AGP 8.13.0, CameraX 1.4.2, Media3 1.7.1, Compose BOM 2025.06.01)
 - **Internal:** OpenRang Android 16 knowledge hub — [`docs/android-16/`](../../android-16/README.md)
+
+---
+
+## Implementation outcome (what actually shipped, vs. this plan)
+
+Verified against `developer.android.com` + Google Maven on 2026-05-28 at implementation time:
+
+- **Build tooling was already current.** AGP `8.13.2` and Gradle `9.0.0` were already on `main` (bumped in earlier PRs), and AGP 8.13 supports max API 36.1 — so no AGP/Gradle change was needed. The plan's "current state" table (AGP 8.3.2 / Gradle 8.x) was stale.
+- **Dependencies went to latest stable, not the plan's numbers.** CameraX `1.3.1 → 1.6.1`, Media3 `1.3.0 → 1.10.1` (the plan named 1.4.2 / 1.7.1, which had been superseded).
+- **D2 escalation fired — Kotlin 2.x migration (owner-approved).** The latest CameraX/Media3 are compiled with Kotlin 2.1 metadata, which the Kotlin 1.9.22 compiler cannot read. Resolved by bumping Kotlin `1.9.22 → 2.3.21`, moving the Compose compiler to the `org.jetbrains.kotlin.plugin.compose` Gradle plugin (removing `kotlinCompilerExtensionVersion`), bumping Compose BOM `2024.02.02 → 2026.05.01`, and migrating `kotlinOptions` → the `compilerOptions` DSL.
+- **16 KB packaging.** `jniLibs.useLegacyPackaging` flipped `true → false` so native libs are stored uncompressed and 16 KB page-aligned; `zipalign -c -P 16` then reports real `(OK)` alignment (with legacy packaging it was a vacuous "compressed" pass). See [Lesson 011](../../lessons_learned/011-16kb-uncompressed-native-libs.md).
+- **R8/shrinking enabled (owner-approved).** `isMinifyEnabled` + `isShrinkResources` = true; added `app/proguard-rules.pro` (relies on CameraX/Media3 consumer rules). Building release surfaced that the three `onboarding_*.png` drawables were actually JPEGs — renamed to `.jpg` (resource refs are extension-agnostic).
+- **Phase 7 cleanup was stale.** The `proguardFiles` block was already a single correct call and the manifest had no `tools:targetApi` — nothing to fix.
+- **Open questions resolved by owner:** Phase 6 Play release spun off to its own issue (with full prep detail); deps pinned to latest stable; R8 on now; large screens made adaptive (no opt-out).
+- **Verification done:** `assembleDebug` + `assembleRelease` green; 24 unit + 10 instrumented tests pass; 16 KB alignment confirmed; onboarding render confirmed on an emulator. **Not yet done:** on-device walkthrough on an API-36/16 KB device and a ≥600dp large-screen visual pass (the only local AVD boots as API 34 on a phone).
