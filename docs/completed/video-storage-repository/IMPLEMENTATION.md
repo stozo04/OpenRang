@@ -1,6 +1,6 @@
 # VideoStorageRepository — Remove Context from OpenRangViewModel
 
-**Issue:** [#10](https://github.com/stozo04/OpenRang/issues/10) · **Branch:** `feature/video-storage-repository` · **Labels:** architecture, refactor, tech-debt
+**Issue:** [#10](https://github.com/stozo04/OpenRang/issues/10) · **Branch:** `feature/video-storage-repository` · **Shipped via:** PR #17 · **Labels:** architecture, refactor, tech-debt
 
 ## Problem statement
 
@@ -46,7 +46,7 @@ Deviation from the issue's Step 4: the issue showed `Factory(context: Context)`.
 ## Testing plan
 
 - **Unit (JVM):** `OpenRangViewModelTest` (26) with the fake — no Context/File mocks. `VideoStorageRepositoryImplTest` (8) against `TemporaryFolder`; `MediaMetadataRetriever` mocked via `mockkConstructor`.
-- **Instrumented (UI):** existing 6 onboarding/permission regression tests must still pass.
+- **Instrumented (UI):** the 10 onboarding/permission regression tests. On API 36 these initially crashed in Espresso (`InputManager.getInstance()` removed in Android 16) — a pre-existing tooling gap fixed by the `androidx.test` bump in **PR #16**. After rebasing this branch on the merged #16, all **10/10 instrumented tests pass** on the Pixel_10 AVD (API 36).
 - **Manual QA:** see PR checklist — record a burst → preview → gallery → delete, on an emulator.
 
 ## Acceptance criteria
