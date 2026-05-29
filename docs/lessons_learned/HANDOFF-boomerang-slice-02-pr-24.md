@@ -83,7 +83,7 @@ For the pass split, log timestamps in `Media3VideoProcessor.renderBoomerang` rig
 **What to expect, and don't be surprised if it exceeds the 1.5 s target.** CameraX records at
 `Quality.HD` (720p), which helps. But pass 2 does a `seekTo` + decode + surface-render **per frame** —
 a 3 s clip at 30 fps is ~90 seeks. Per-frame seeking is the classic bottleneck of this algorithm and
-can easily be 1–2 s on its own; add pass-1 transcode (~0.3–0.6 s) and the encode (~0.4–0.6 s) and a
+can easily be 1–2 s on its own; add pass-1 transcode (~0.3–0.6 s) and to encode (~0.4–0.6 s) and a
 realistic cache-miss total is **~2–3 s**, not 1.5 s. Cold codec instantiation
 (`createEncoderByType`/`configure`) adds ~100–300 ms to the first render of a session.
 
