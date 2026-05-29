@@ -103,7 +103,7 @@ class BoomerangEditorScreenTest {
     fun loadingShimmer_isShown_whileReverseNotReady() {
         setContent(mode = BoomerangMode.REVERSE, reversedFile = null, isReversedFileLoading = true)
         composeTestRule.onNodeWithTag("reverse_loading").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Preparing reverse…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Loopifying…").assertIsDisplayed()
     }
 
     @Test

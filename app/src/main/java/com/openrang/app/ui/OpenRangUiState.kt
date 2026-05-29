@@ -73,7 +73,7 @@ data class TrimState(
  *
  * [reversedFile] caches the reversed clip the preview plays for any reverse-containing [mode]; it is
  * produced once per trim (shared with the render via the same `VideoProcessor`) and is `null` until
- * generated. [isReversedFileLoading] drives the "Preparing reverse…" shimmer over the preview.
+ * generated. [isReversedFileLoading] drives the "Loopifying…" shimmer over the preview.
  */
 data class EditorTabState(
     val mode: BoomerangMode = BoomerangMode.FORWARD_THEN_REVERSE,

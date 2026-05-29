@@ -134,7 +134,7 @@ fun BoomerangEditorScreen(
  * Stateless editor UI, hoisted out of [BoomerangEditorScreen] so it can be exercised in a Compose
  * test without a ViewModel (mirrors `TrimScreenContent`). The direction-aware preview is built from
  * the trimmed source and the (cached) reversed file; while a reverse-containing mode is selected and
- * its reversed clip isn't ready yet, a "Preparing reverse…" shimmer covers the preview and Save is
+ * its reversed clip isn't ready yet, a "Loopifying…" shimmer covers the preview and Save is
  * disabled.
  */
 @OptIn(UnstableApi::class)
@@ -233,17 +233,36 @@ fun BoomerangEditorContent(
             )
 
             if (awaitingReverse) {
+                // Soft dark scrim (the dimmed preview frame still shows through) + a glassmorphic card,
+                // rather than a flat colour wash — matches the app's DeepCharcoal/GlassWhite surfaces.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(NeonPurple.copy(alpha = 0.8f))
+                        .background(Color.Black.copy(alpha = 0.45f))
                         .testTag("reverse_loading"),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Color.White)
-                        Spacer(Modifier.height(12.dp))
-                        Text("Preparing reverse…", color = Color.White, fontSize = 13.sp)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(DeepCharcoal)
+                            .border(1.dp, GlassWhiteBorder, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 28.dp, vertical = 22.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            color = NeonPurple,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(34.dp),
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            text = "Loopifying…",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.5.sp,
+                        )
                     }
                 }
             }
