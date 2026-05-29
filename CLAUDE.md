@@ -103,7 +103,7 @@ com.openrang.app/
 │   ├── CameraScreen.kt          # Live viewfinder, shutter (+ shared design tokens)
 │   ├── OnboardingScreen.kt      # 3-page carousel
 │   ├── TrimScreen.kt            # Post-capture trim (two-handle bar, NEXT)
-│   ├── BoomerangEditorScreen.kt # Tabbed editor — Direction tab (slice 03); Speed/Reps tabs land 04/05
+│   ├── BoomerangEditorScreen.kt # Tabbed editor — Direction + Speed tabs (slice 03/04); Reps stub disabled until 05
 │   ├── ProcessingScreen.kt      # Render spinner
 │   ├── PreviewScreen.kt         # Looping ExoPlayer playback (gallery target, slice 07)
 │   └── GalleryScreen.kt         # 3-col grid, thumbnails, delete

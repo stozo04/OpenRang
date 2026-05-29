@@ -66,10 +66,26 @@ data class TrimState(
     val trimEndMs: Long = sourceDurationMs,
 )
 
+/** The interactive tabs in the boomerang editor's bottom tab bar. */
+enum class EditorTab {
+    /** Direction chips (slice 03). */
+    DIRECTION,
+
+    /** Speed slider (slice 04). */
+    SPEED,
+    // REPS arrives in slice 05 — its tab-bar icon ships as a disabled stub this slice (no enum case,
+    // since the stub is non-selectable and never becomes the activeTab).
+}
+
 /**
  * The boomerang editor's tab selections, held by [OpenRangViewModel] in a sibling flow to the routed
  * [OpenRangUiState.BoomerangEditor] (same slim-discriminator split as [TrimState] is to
- * [OpenRangUiState.Trim]). Slice 03 only exposes the Direction tab; [mode] is its single control.
+ * [OpenRangUiState.Trim]). Slice 03 added the Direction tab ([mode]); slice 04 adds the Speed tab
+ * ([speed]) and the [activeTab] selector that switches the content panel between them.
+ *
+ * [speed] is the playback speed multiplier (0.25×–3.0×, default 2.0×): a player-side effect on the
+ * preview (`setPlaybackSpeed`) and a per-clip render effect at save (`SpeedChangeEffect`). It is *not*
+ * baked into [reversedFile], so changing speed never invalidates the cached reverse.
  *
  * [reversedFile] caches the reversed clip the preview plays for any reverse-containing [mode]; it is
  * produced once per trim (shared with the render via the same `VideoProcessor`) and is `null` until
@@ -77,6 +93,8 @@ data class TrimState(
  */
 data class EditorTabState(
     val mode: BoomerangMode = BoomerangMode.FORWARD_THEN_REVERSE,
+    val speed: Float = 2.0f,
+    val activeTab: EditorTab = EditorTab.DIRECTION,
     val reversedFile: File? = null,
     val isReversedFileLoading: Boolean = false,
 )

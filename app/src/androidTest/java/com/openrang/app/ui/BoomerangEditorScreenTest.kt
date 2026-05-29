@@ -1,18 +1,24 @@
 package com.openrang.app.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertRangeInfoEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.openrang.app.media.BoomerangMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,9 +43,13 @@ class BoomerangEditorScreenTest {
         trimStartMs: Long = 0L,
         trimEndMs: Long = 5_000L,
         mode: BoomerangMode = BoomerangMode.FORWARD_THEN_REVERSE,
+        speed: Float = 2.0f,
+        activeTab: EditorTab = EditorTab.DIRECTION,
         reversedFile: File? = dummyReversed,
         isReversedFileLoading: Boolean = false,
         onSelectMode: (BoomerangMode) -> Unit = {},
+        onSpeedChange: (Float) -> Unit = {},
+        onSwitchTab: (EditorTab) -> Unit = {},
         onSave: () -> Unit = {},
         onBack: () -> Unit = {},
     ) {
@@ -49,9 +59,13 @@ class BoomerangEditorScreenTest {
                 trimStartMs = trimStartMs,
                 trimEndMs = trimEndMs,
                 mode = mode,
+                speed = speed,
+                activeTab = activeTab,
                 reversedFile = reversedFile,
                 isReversedFileLoading = isReversedFileLoading,
                 onSelectMode = onSelectMode,
+                onSpeedChange = onSpeedChange,
+                onSwitchTab = onSwitchTab,
                 onSave = onSave,
                 onBack = onBack,
             )
@@ -135,5 +149,71 @@ class BoomerangEditorScreenTest {
         // FORWARD over a 5 s trim at 2× → 2.5 s output (single cycle clip).
         setContent(trimStartMs = 0L, trimEndMs = 5_000L, mode = BoomerangMode.FORWARD, reversedFile = null)
         composeTestRule.onNodeWithText("2.5s").assertIsDisplayed()
+    }
+
+    // ── Speed tab (slice 04) ──
+
+    @Test
+    fun tabBar_showsThreeSlots() {
+        setContent()
+        composeTestRule.onNodeWithTag("tab_direction").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("tab_speed").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("tab_reps").assertIsDisplayed()
+    }
+
+    @Test
+    fun repsTab_isDisabledStub() {
+        var switched: EditorTab? = null
+        setContent(onSwitchTab = { switched = it })
+        composeTestRule.onNodeWithTag("tab_reps").assertIsNotEnabled()
+        // Tapping the disabled stub must not switch tabs.
+        composeTestRule.onNodeWithTag("tab_reps").performClick()
+        assertNull("disabled Reps stub must not switch tabs", switched)
+    }
+
+    @Test
+    fun tappingSpeedTab_invokesOnSwitchTabWithSpeed() {
+        var switched: EditorTab? = null
+        setContent(onSwitchTab = { switched = it })
+        composeTestRule.onNodeWithTag("tab_speed").performClick()
+        assertEquals(EditorTab.SPEED, switched)
+    }
+
+    @Test
+    fun directionTabActive_showsChips_notSlider() {
+        setContent(activeTab = EditorTab.DIRECTION)
+        composeTestRule.onNodeWithTag("direction_chip_FORWARD").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("speed_slider").assertDoesNotExist()
+    }
+
+    @Test
+    fun speedTabActive_showsSlider_notChips() {
+        setContent(activeTab = EditorTab.SPEED)
+        composeTestRule.onNodeWithTag("speed_slider").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("direction_chip_FORWARD").assertDoesNotExist()
+    }
+
+    @Test
+    fun slider_reportsCurrentSpeedAsRangeInfo() {
+        setContent(activeTab = EditorTab.SPEED, speed = 1.75f)
+        composeTestRule.onNodeWithTag("speed_slider")
+            .assertRangeInfoEquals(ProgressBarRangeInfo(1.75f, 0.25f..3.0f))
+    }
+
+    @Test
+    fun draggingSlider_invokesOnSpeedChange() {
+        var changed: Float? = null
+        setContent(activeTab = EditorTab.SPEED, speed = 2.0f, onSpeedChange = { changed = it })
+        // Drive the slider via its SetProgress semantics action (stable across the custom drawing).
+        composeTestRule.onNodeWithTag("speed_slider")
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(0.5f) }
+        assertEquals(0.5f, changed!!, 0.0001f)
+    }
+
+    @Test
+    fun durationLabel_reflectsTheSelectedSpeed() {
+        // F→R over a 5 s trim: cycle = 10 s. At 0.5× → 20.0 s output (10 s / 0.5).
+        setContent(trimStartMs = 0L, trimEndMs = 5_000L, mode = BoomerangMode.FORWARD_THEN_REVERSE, speed = 0.5f)
+        composeTestRule.onNodeWithText("20.0s").assertIsDisplayed()
     }
 }

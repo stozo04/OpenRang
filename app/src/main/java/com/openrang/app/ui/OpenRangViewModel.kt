@@ -357,6 +357,26 @@ class OpenRangViewModel(
     }
 
     /**
+     * Set the playback speed from the editor's Speed tab (slice 04). Clamped to [MIN_SPEED]..[MAX_SPEED]
+     * so neither the player nor the renderer ever sees an out-of-range value, regardless of what the
+     * slider emits. Speed is a player-side effect on the preview and a per-clip render effect at save —
+     * it never touches the cached [EditorTabState.reversedFile], so no reverse regeneration is needed.
+     */
+    fun updateSpeed(speed: Float) {
+        val clamped = speed.coerceIn(MIN_SPEED, MAX_SPEED)
+        val current = _editorTabState.value
+        if (current.speed == clamped) return
+        _editorTabState.value = current.copy(speed = clamped)
+    }
+
+    /** Switch the editor's active tab (Direction ↔ Speed); pure UI state, no side effects. */
+    fun switchTab(tab: EditorTab) {
+        val current = _editorTabState.value
+        if (current.activeTab == tab) return
+        _editorTabState.value = current.copy(activeTab = tab)
+    }
+
+    /**
      * Ensure the reversed clip for the current trim exists (for the preview, and reused by the render).
      * Serialized against fast chip-taps: once the reversed file is ready or a generation is already in
      * flight, further calls are ignored (KICKOFF §4 — the trim is fixed for the session, so one run
@@ -387,18 +407,19 @@ class OpenRangViewModel(
     }
 
     /**
-     * Save the boomerang in the editor's current direction (speed 2× / 1 rep are hard-wired this
-     * slice). Flips to [OpenRangUiState.Processing]; on success promotes the scratch to a persistent
+     * Save the boomerang in the editor's current direction + speed (1 rep is still hard-wired until
+     * slice 05). Flips to [OpenRangUiState.Processing]; on success promotes the scratch to a persistent
      * raw, registers the boomerang, emits [BoomerangEvent.Saved] and returns to capture. The render
      * sources the **scratch** file — the same path the preview reversed — so a reverse-containing mode
-     * hits the cached reversed clip instead of regenerating it. On failure it emits
-     * [BoomerangEvent.Failed] and routes back to [OpenRangUiState.BoomerangEditor] with the direction
-     * selection intact.
+     * hits the cached reversed clip instead of regenerating it (speed is applied per clip at render and
+     * doesn't invalidate that cache). On failure it emits [BoomerangEvent.Failed] and routes back to
+     * [OpenRangUiState.BoomerangEditor] with the direction + speed selection intact.
      */
     fun saveBoomerang() {
         val editor = _editorState.value ?: return
         val scratch = activeScratch ?: return
-        val mode = _editorTabState.value.mode
+        val tab = _editorTabState.value
+        val mode = tab.mode
 
         _uiState.value = OpenRangUiState.Processing
         _renderProgress.value = 0f
@@ -416,7 +437,7 @@ class OpenRangViewModel(
                     trimStartMs = editor.trimStartMs,
                     trimEndMs = editor.trimEndMs,
                     mode = mode,
-                    speed = DEFAULT_SPEED,
+                    speed = tab.speed,
                     repetitions = DEFAULT_REPS,
                     outputFile = output,
                 ) { fraction -> _renderProgress.value = fraction }
@@ -480,9 +501,14 @@ class OpenRangViewModel(
         /** Minimum trimmed duration; below this the NEXT action is disabled (slice 02). */
         const val MIN_TRIM_MS = 400L
 
-        /** Hard-wired default boomerang config for slice 02 (direction/speed/reps pickers arrive 03–05). */
+        /** Default boomerang config. Direction picker shipped slice 03, speed slider slice 04; reps (1) is
+         *  still hard-wired until slice 05. [DEFAULT_SPEED] is the slider's starting value. */
         const val DEFAULT_SPEED = 2.0f
         const val DEFAULT_REPS = 1
+
+        /** Playback-speed slider bounds (slice 04); [updateSpeed] clamps to this range. */
+        const val MIN_SPEED = 0.25f
+        const val MAX_SPEED = 3.0f
     }
 
     class Factory(
