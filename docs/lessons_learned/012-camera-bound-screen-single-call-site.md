@@ -21,7 +21,7 @@ Root cause was in **`MainActivity.kt` routing**, not the recording logic. `Ready
 and `Recording` were rendered from **two separate `when` branches**, each with its own
 `CameraScreen(...)` call:
 
-```kotlin
+```text
 is OpenRangUiState.ReadyToCapture -> { CameraScreen(viewModel, cameraManager) }  // call site A
 is OpenRangUiState.Recording      -> { CameraScreen(viewModel, cameraManager) }  // call site B
 ```
@@ -48,7 +48,7 @@ Route every state that shows the same camera-bound screen through **one** call s
 preserves a single instance (and its bound camera + `startCamera` `LaunchedEffect`) across the
 transition:
 
-```kotlin
+```text
 // MainActivity.kt — ONE branch, ONE CameraScreen instance for both capture states.
 is OpenRangUiState.ReadyToCapture,
 is OpenRangUiState.Recording -> {
