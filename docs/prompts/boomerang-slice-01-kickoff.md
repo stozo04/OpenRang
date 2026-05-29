@@ -1,9 +1,3 @@
-# Boomerang Slice 01 — Kickoff Prompt for a Fresh Claude Code Session
-
-Copy everything below the line into a fresh Claude Code session with the OpenRang folder mounted. This kickoff is specific to **slice 01 (Variable-length capture, ≤30 s)**. A reuse footer at the very bottom of this file shows the one-line edit needed to repurpose this prompt for slices 02–07.
-
----
-
 ## Session Prompt — Implement Boomerang Slice 01
 
 You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
@@ -128,20 +122,3 @@ After the PR is open, you're done with this session. The next session picks up e
 - If the green baseline in Phase 1 is *not* green (someone broke `main` and it needs fixing first).
 - If `zipalign` on the release APK shows `(OK - compressed)` for any `.so` (Lesson 011 regression — flag immediately).
 - If you discover the work is meaningfully larger than the slice doc implies (would be > ~600 LOC). Slices are PR-sized by design; if this one isn't, the slicing was wrong.
-
----
-
-## How to reuse this prompt for slices 02–07
-
-This file is intentionally slice-01-specific because concrete examples are more useful than parameterized templates. To adapt it for another slice:
-
-1. Copy this file to `docs/prompts/boomerang-slice-<NN>-kickoff.md`.
-2. Replace every reference to `01-capture-variable-length.md` with the target slice's filename.
-3. Replace the "What slice 01 ships" paragraph with the new slice's one-paragraph summary (pulled from the rollout README's table or the slice's "Problem" section).
-4. Replace Phase 3's file-by-file deltas with the new slice's "Technical deltas" section.
-5. Update Phase 5's manual QA bullets with the new slice's checklist.
-6. Update the "When to stop" list with anything slice-specific (e.g., for slice 02, "if the cached reverse file location collides with anything in `cacheDir/scratch/`").
-7. Update the PR title in Phase 6.
-8. Add the new branch name in Phase 1 (`feature/boomerang-slice-<NN>-<short-name>`).
-
-The required-reading list (Phase 0) and behavioral rules stay the same across all 7 slices — those are project invariants, not slice specifics.

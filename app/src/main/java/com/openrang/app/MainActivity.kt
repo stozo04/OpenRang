@@ -52,6 +52,7 @@ import com.openrang.app.data.UserPreferencesRepositoryImpl
 import com.openrang.app.data.VideoStorageRepositoryImpl
 import com.openrang.app.data.dataStore
 import com.openrang.app.ui.CameraScreen
+import com.openrang.app.ui.CameraScreenHost
 import com.openrang.app.ui.GalleryScreen
 import com.openrang.app.ui.OnboardingScreen
 import com.openrang.app.ui.OpenRangUiState
@@ -148,17 +149,19 @@ class MainActivity : ComponentActivity() {
                                 onSecondaryAction = { openAppSettings() }
                             )
                         }
-                        is OpenRangUiState.ReadyToCapture -> {
-                            CameraScreen(
-                                viewModel = viewModel,
-                                cameraManager = cameraManager
-                            )
-                        }
+                        // ReadyToCapture and Recording MUST share this single call site. Two
+                        // separate branches make Compose dispose+rebuild CameraScreen on the
+                        // start/stop transition, which re-runs its startCamera() effect, calls
+                        // unbindAll(), and kills the in-flight recording (ERROR_SOURCE_INACTIVE).
+                        // CameraScreenHost keeps one CameraScreen instance alive across both.
+                        is OpenRangUiState.ReadyToCapture,
                         is OpenRangUiState.Recording -> {
-                            CameraScreen(
-                                viewModel = viewModel,
-                                cameraManager = cameraManager
-                            )
+                            CameraScreenHost(uiState) {
+                                CameraScreen(
+                                    viewModel = viewModel,
+                                    cameraManager = cameraManager
+                                )
+                            }
                         }
                         is OpenRangUiState.LoopingPreview -> {
                             val state = uiState as OpenRangUiState.LoopingPreview

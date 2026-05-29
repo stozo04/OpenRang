@@ -1,6 +1,7 @@
 package com.openrang.app.ui
 
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,13 +37,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -107,6 +115,34 @@ val SwitchCameraIcon: ImageVector
         close()
     }.build()
 
+/**
+ * Single hosting call site for the two camera-bound states ([OpenRangUiState.ReadyToCapture] and
+ * [OpenRangUiState.Recording]).
+ *
+ * WHY THIS EXISTS: if those two states are rendered from two *separate* `when` branches in the
+ * navigation (each with its own `CameraScreen(...)` call), Compose disposes one and builds the
+ * other on the start/stop transition. That remount re-runs [CameraScreen]'s
+ * `LaunchedEffect { startCamera() }`, which calls `unbindAll()` and tears the camera out from under
+ * the in-flight recording — finalizing it immediately with `ERROR_SOURCE_INACTIVE` (~25 ms after
+ * the user taps record). Routing both states through this one composable keeps a single
+ * [content] instance alive across the transition, so the camera stays bound and recording runs
+ * until the user taps stop or the 30 s cap fires.
+ *
+ * Regression guard: `CameraScreenTest.cameraScreenHost_keepsContentMounted_acrossCaptureTransition`.
+ */
+@Composable
+fun CameraScreenHost(
+    uiState: OpenRangUiState,
+    content: @Composable () -> Unit
+) {
+    val isCaptureState = uiState is OpenRangUiState.ReadyToCapture ||
+        uiState is OpenRangUiState.Recording
+    if (isCaptureState) {
+        // One call site for BOTH capture states — do not split this into per-state branches.
+        content()
+    }
+}
+
 @Composable
 fun CameraScreen(
     viewModel: OpenRangViewModel,
@@ -116,7 +152,20 @@ fun CameraScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsStateWithLifecycle()
     val isRecording = uiState is OpenRangUiState.Recording
+
+    // Fraction of the 30 s hard cap elapsed; drives the shutter progress ring sweep.
+    val progress = (recordingElapsedMs.toFloat() / OpenRangViewModel.MAX_RECORDING_MS).coerceIn(0f, 1f)
+    // 00:SS countdown for the chip (elapsed side of "MM:SS / 00:30").
+    val elapsedLabel = "%02d:%02d".format(
+        recordingElapsedMs / 60_000,
+        (recordingElapsedMs / 1000) % 60
+    )
+    val capLabel = "%02d:%02d".format(
+        OpenRangViewModel.MAX_RECORDING_MS / 60_000,
+        (OpenRangViewModel.MAX_RECORDING_MS / 1000) % 60
+    )
 
     // Set up standard aspect-ratio responsive PreviewView
     val previewView = remember {
@@ -179,21 +228,12 @@ fun CameraScreen(
                 )
             }
 
-            if (isRecording) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "RECORDING BURST...",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = NeonCoral,
-                        letterSpacing = 2.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
+            // Countdown chip — top-center, recording only.
+            RecordingCountdownChip(
+                visible = isRecording,
+                text = "$elapsedLabel / $capLabel",
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // 3. Glassmorphic Control Overlay & Shutter Button at bottom
@@ -231,52 +271,27 @@ fun CameraScreen(
                         .border(1.dp, GlassWhiteBorder, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
+                    // Reflects the new 30 s hard cap (was a stale "1.5s" from the old self-stop).
                     Text(
-                        text = "1.5s",
+                        text = "30s",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
                 }
 
-                // Shutter Button with stunning dual-ring glowing aesthetics
-                Box(
-                    modifier = Modifier
-                        .size(86.dp)
-                        .clip(CircleShape)
-                        .background(if (isRecording) NeonCoral.copy(alpha = 0.2f) else GlassWhite)
-                        .border(
-                            width = if (isRecording) 5.dp else 3.dp,
-                            color = if (isRecording) NeonCoral else Color.White,
-                            shape = CircleShape
-                        )
-                        .padding(if (isRecording) 12.dp else 6.dp)
-                        .clickable(
-                            enabled = !isRecording,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
+                // Shutter Button: tap-to-start / tap-to-stop, with a progress ring.
+                ShutterButton(
+                    isRecording = isRecording,
+                    progressFraction = progress,
+                    onClick = {
+                        if (isRecording) {
+                            viewModel.stopBurstCapture(cameraManager)
+                        } else {
                             viewModel.startBurstCapture(cameraManager)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .background(
-                                if (isRecording) {
-                                    Brush.linearGradient(
-                                        colors = listOf(NeonCoral, Color.Red)
-                                    )
-                                } else {
-                                    Brush.linearGradient(
-                                        colors = listOf(NeonCoral, NeonPurple)
-                                    )
-                                }
-                            )
-                    )
-                }
+                        }
+                    }
+                )
 
                 // Switch Camera / Lens Toggle Button (subtle glass to match 1.5s badge)
                 Box(
@@ -298,6 +313,123 @@ fun CameraScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Tap-to-start / tap-to-stop shutter with a progress ring.
+ *
+ * Stateless and hoisted (mirrors [OnboardingNavigation]) so it can be exercised in Compose UI
+ * tests without binding the camera. While [isRecording], a [NeonCoral] ring sweeps clockwise from
+ * 12 o'clock proportional to [progressFraction] (0f..1f toward the 30 s cap), the interior dims,
+ * and the dot is replaced by a square "stop" glyph.
+ */
+@Composable
+fun ShutterButton(
+    isRecording: Boolean,
+    progressFraction: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        // Progress ring — drawn just outside the 86.dp button, recording only.
+        if (isRecording) {
+            Canvas(
+                modifier = Modifier
+                    .size(98.dp)
+                    .testTag("progress_ring")
+            ) {
+                val strokeWidth = 4.dp.toPx()
+                val inset = strokeWidth / 2f
+                drawArc(
+                    color = NeonCoral,
+                    startAngle = -90f,
+                    sweepAngle = progressFraction.coerceIn(0f, 1f) * 360f,
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = Size(size.width - strokeWidth, size.height - strokeWidth),
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .size(86.dp)
+                .clip(CircleShape)
+                .background(if (isRecording) NeonCoral.copy(alpha = 0.2f) else GlassWhite)
+                .border(
+                    width = if (isRecording) 5.dp else 3.dp,
+                    color = if (isRecording) NeonCoral else Color.White,
+                    shape = CircleShape
+                )
+                .padding(if (isRecording) 12.dp else 6.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick
+                )
+                .semantics {
+                    contentDescription = if (isRecording) "Stop recording" else "Start recording"
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isRecording) {
+                // Stop glyph: small rounded square over the dimmed interior (vs. the idle dot).
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(NeonCoral)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(NeonCoral, NeonPurple)
+                            )
+                        )
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Top-center countdown chip shown only while recording: monospaced `MM:SS / 00:30` on a glass
+ * surface (DeepCharcoal 80% over a GlassWhite 20% base). Renders nothing when [visible] is false,
+ * so the visibility rule itself is testable (mirrors [OnboardingNavigation]'s hoisted pattern).
+ */
+@Composable
+fun RecordingCountdownChip(
+    visible: Boolean,
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    if (!visible) return
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(percent = 50))
+                .background(GlassWhite)
+                .background(DeepCharcoal)
+                .border(1.dp, GlassWhiteBorder, RoundedCornerShape(percent = 50))
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+                .testTag("countdown_chip")
+        ) {
+            Text(
+                text = text,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color.White,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

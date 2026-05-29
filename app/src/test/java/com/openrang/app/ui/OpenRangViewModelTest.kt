@@ -253,7 +253,7 @@ class OpenRangViewModelTest {
     }
 
     @Test
-    fun `startBurstCapture successfully starts recording and delays automatic stop`() =
+    fun `startBurstCapture starts recording and auto-caps at 30 seconds`() =
         runTest(mainDispatcherRule.testDispatcher) {
             viewModel.onPermissionsChecked(true) // Set state to ReadyToCapture
 
@@ -265,11 +265,56 @@ class OpenRangViewModelTest {
 
             assertEquals(OpenRangUiState.Recording, viewModel.uiState.value)
             verify(exactly = 1) { cameraManager.startRecording(any(), any()) }
-            // Auto-stop is scheduled behind a delay(1500), so it must not fire yet.
+            // The 30 s auto-cap must not fire on start — only after the cap elapses.
             verify(exactly = 0) { cameraManager.stopRecording() }
 
-            // Advance virtual time past the auto-stop timer.
+            // Advance virtual time past the 30 s hard cap (Lesson 008: bound loop + advanceUntilIdle).
             advanceUntilIdle()
+
+            // Auto-cap finalized exactly once, and the ring was reset to empty.
+            verify(exactly = 1) { cameraManager.stopRecording() }
+            assertEquals(0L, viewModel.recordingElapsedMs.value)
+        }
+
+    @Test
+    fun `startBurstCapture begins emitting recordingElapsedMs`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            viewModel.onPermissionsChecked(true) // ReadyToCapture
+            every { cameraManager.startRecording(any(), any()) } returns null
+
+            assertEquals(0L, viewModel.recordingElapsedMs.value)
+
+            viewModel.startBurstCapture(cameraManager)
+            // Advance just over three ~33 ms ticks; elapsed should have started climbing but
+            // stay well under the cap.
+            advanceTimeBy(100)
+
+            val elapsed = viewModel.recordingElapsedMs.value
+            assertTrue("elapsed should advance past 0, was $elapsed", elapsed > 0L)
+            assertTrue("elapsed should be <= 100ms, was $elapsed", elapsed <= 100L)
+
+            // Stop so the ticker doesn't run to the cap during teardown.
+            viewModel.stopBurstCapture(cameraManager)
+        }
+
+    @Test
+    fun `stopBurstCapture outside Recording is a no-op`() {
+        // Never entered Recording, so recordingJob is null — stop must not touch the camera.
+        viewModel.stopBurstCapture(cameraManager)
+        verify(exactly = 0) { cameraManager.stopRecording() }
+    }
+
+    @Test
+    fun `double stop (user tap racing the auto-cap) calls stopRecording exactly once`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            viewModel.onPermissionsChecked(true) // ReadyToCapture
+            every { cameraManager.startRecording(any(), any()) } returns null
+
+            viewModel.startBurstCapture(cameraManager)
+            // First stop wins; the second is a no-op (recordingJob already nulled). This is the
+            // same guard that makes a user tap landing on the auto-cap tick safe.
+            viewModel.stopBurstCapture(cameraManager)
+            viewModel.stopBurstCapture(cameraManager)
 
             verify(exactly = 1) { cameraManager.stopRecording() }
         }
