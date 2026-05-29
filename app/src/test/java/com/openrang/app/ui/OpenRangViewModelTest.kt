@@ -109,7 +109,7 @@ class FakeVideoStorageRepository : VideoStorageRepository {
         return ScratchCapture(uuid, File(tempRoot, "raw_$uuid.mp4"))
     }
 
-    override fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo? {
+    override suspend fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo? {
         if (failPromote) return null
         val id = nextId++
         return RecordedVideo(
@@ -127,7 +127,7 @@ class FakeVideoStorageRepository : VideoStorageRepository {
     override fun allocateBoomerangFile(sourceRawId: Long): File =
         File(tempRoot, "boom_${nextId++}_from_$sourceRawId.mp4")
 
-    override fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo? {
+    override suspend fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo? {
         if (failRegister) return null
         val id = nextId++
         return RecordedVideo(
@@ -139,11 +139,11 @@ class FakeVideoStorageRepository : VideoStorageRepository {
         ).also { saved.add(it) }
     }
 
-    override fun durationOf(file: File): Long = fixedDurationMs
+    override suspend fun durationOf(file: File): Long = fixedDurationMs
 
-    override fun loadRecordedVideos(): List<RecordedVideo> = saved.sortedByDescending { it.id }
+    override suspend fun loadRecordedVideos(): List<RecordedVideo> = saved.sortedByDescending { it.id }
 
-    override fun deleteVideo(video: RecordedVideo) {
+    override suspend fun deleteVideo(video: RecordedVideo) {
         saved.remove(video)
     }
 }
@@ -596,15 +596,17 @@ class OpenRangViewModelTest {
     }
 
     @Test
-    fun `navigateToGallery loads videos from storage`() {
-        // Seed storage with a saved clip, then enter the gallery.
-        fakeVideoStorage.promoteScratchToRaw(fakeVideoStorage.createScratchCapture())
+    fun `navigateToGallery loads videos from storage`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            // Seed storage with a saved clip, then enter the gallery.
+            fakeVideoStorage.promoteScratchToRaw(fakeVideoStorage.createScratchCapture())
 
-        viewModel.navigateToGallery()
+            viewModel.navigateToGallery()
+            advanceUntilIdle() // the gallery load now runs on a launched coroutine
 
-        assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
-        assertEquals(1, viewModel.recordedVideos.value.size)
-    }
+            assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+            assertEquals(1, viewModel.recordedVideos.value.size)
+        }
 
     @Test
     fun `navigateBackFromGallery transitions state to ReadyToCapture`() {
@@ -623,19 +625,22 @@ class OpenRangViewModelTest {
     }
 
     @Test
-    fun `deleteVideo removes video from storage and reloads list`() {
-        // Seed two clips so the delete leaves a non-trivial remainder.
-        fakeVideoStorage.promoteScratchToRaw(fakeVideoStorage.createScratchCapture())
-        fakeVideoStorage.promoteScratchToRaw(fakeVideoStorage.createScratchCapture())
-        viewModel.loadRecordedVideos()
-        assertEquals(2, viewModel.recordedVideos.value.size)
+    fun `deleteVideo removes video from storage and reloads list`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            // Seed two clips so the delete leaves a non-trivial remainder.
+            fakeVideoStorage.promoteScratchToRaw(fakeVideoStorage.createScratchCapture())
+            fakeVideoStorage.promoteScratchToRaw(fakeVideoStorage.createScratchCapture())
+            viewModel.loadRecordedVideos()
+            advanceUntilIdle()
+            assertEquals(2, viewModel.recordedVideos.value.size)
 
-        val toDelete = viewModel.recordedVideos.value.first()
-        viewModel.deleteVideo(toDelete)
+            val toDelete = viewModel.recordedVideos.value.first()
+            viewModel.deleteVideo(toDelete)
+            advanceUntilIdle()
 
-        assertEquals(1, viewModel.recordedVideos.value.size)
-        assertFalse(viewModel.recordedVideos.value.contains(toDelete))
-    }
+            assertEquals(1, viewModel.recordedVideos.value.size)
+            assertFalse(viewModel.recordedVideos.value.contains(toDelete))
+        }
 
     @Test
     fun `recordedVideos flow starts as empty list`() {

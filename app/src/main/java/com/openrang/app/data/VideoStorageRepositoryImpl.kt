@@ -3,7 +3,10 @@ package com.openrang.app.data
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 
 /**
@@ -29,71 +32,100 @@ class VideoStorageRepositoryImpl(
     private val thumbnailsDir = File(filesDir, "thumbnails")
     private val scratchDir = File(cacheDir, "scratch")
 
+    /**
+     * Last minted millis-timestamp id. Two saves in the same wall-clock millisecond would otherwise
+     * collide on the `clip_<ts>` / `boom_<ts>` filename and `id`; [nextTimestamp] guarantees a
+     * strictly increasing value across both `promoteScratchToRaw` and `allocateBoomerangFile`.
+     */
+    private var lastTimestamp = 0L
+
+    @Synchronized
+    private fun nextTimestamp(): Long {
+        val now = System.currentTimeMillis()
+        val ts = if (now > lastTimestamp) now else lastTimestamp + 1
+        lastTimestamp = ts
+        return ts
+    }
+
     override fun createScratchCapture(): ScratchCapture {
         scratchDir.mkdirs()
         val uuid = UUID.randomUUID().toString()
         return ScratchCapture(uuid, File(scratchDir, "raw_$uuid.mp4"))
     }
 
-    override fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo? {
-        val timestamp = System.currentTimeMillis()
-        val destVideo = File(videosDir.apply { mkdirs() }, "clip_$timestamp.mp4")
-        val destThumb = File(thumbnailsDir.apply { mkdirs() }, "clip_$timestamp.jpg")
+    override suspend fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo? =
+        withContext(Dispatchers.IO) {
+            val timestamp = nextTimestamp()
+            val destVideo = File(videosDir.apply { mkdirs() }, "clip_$timestamp.mp4")
+            val destThumb = File(thumbnailsDir.apply { mkdirs() }, "clip_$timestamp.jpg")
 
-        return try {
-            scratch.file.copyTo(destVideo, overwrite = true)
-            extractThumbnail(destVideo, destThumb)
-            RecordedVideo(
-                id = timestamp,
-                videoPath = destVideo.absolutePath,
-                thumbnailPath = destThumb.absolutePath,
-                kind = VideoKind.RAW,
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to promote scratch capture ${scratch.uuid} to raw", e)
-            null
+            try {
+                scratch.file.copyTo(destVideo, overwrite = true)
+                extractThumbnail(destVideo, destThumb)
+                RecordedVideo(
+                    id = timestamp,
+                    videoPath = destVideo.absolutePath,
+                    thumbnailPath = destThumb.absolutePath,
+                    kind = VideoKind.RAW,
+                )
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to promote scratch capture ${scratch.uuid} to raw", e)
+                null
+            } catch (e: IllegalArgumentException) {
+                // MediaMetadataRetriever.setDataSource on an unreadable scratch file.
+                Log.e(TAG, "Failed to promote scratch capture ${scratch.uuid} to raw", e)
+                null
+            }
         }
-    }
 
     override fun discardScratch(scratch: ScratchCapture) {
         try {
             if (scratch.file.exists()) {
                 scratch.file.delete()
             }
-        } catch (e: Exception) {
+        } catch (e: SecurityException) {
             Log.e(TAG, "Failed to discard scratch ${scratch.uuid}", e)
         }
     }
 
     override fun allocateBoomerangFile(sourceRawId: Long): File {
-        val timestamp = System.currentTimeMillis()
+        val timestamp = nextTimestamp()
         return File(boomerangsDir.apply { mkdirs() }, "boom_${timestamp}_from_$sourceRawId.mp4")
     }
 
-    override fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo? {
-        return try {
-            val id = parseTimestamp(file.name, prefix = "boom_") ?: System.currentTimeMillis()
-            val destThumb = File(thumbnailsDir.apply { mkdirs() }, "${file.nameWithoutExtension}.jpg")
-            extractThumbnail(file, destThumb)
-            RecordedVideo(
-                id = id,
-                videoPath = file.absolutePath,
-                thumbnailPath = destThumb.absolutePath,
-                kind = VideoKind.BOOMERANG,
-                sourceRawId = sourceRawId,
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to register boomerang ${file.name}", e)
-            null
+    override suspend fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo? =
+        withContext(Dispatchers.IO) {
+            try {
+                val id = parseTimestamp(file.name, prefix = "boom_") ?: nextTimestamp()
+                val destThumb = File(thumbnailsDir.apply { mkdirs() }, "${file.nameWithoutExtension}.jpg")
+                extractThumbnail(file, destThumb)
+                RecordedVideo(
+                    id = id,
+                    videoPath = file.absolutePath,
+                    thumbnailPath = destThumb.absolutePath,
+                    kind = VideoKind.BOOMERANG,
+                    sourceRawId = sourceRawId,
+                )
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to register boomerang ${file.name}", e)
+                null
+            } catch (e: IllegalArgumentException) {
+                Log.e(TAG, "Failed to register boomerang ${file.name}", e)
+                null
+            }
         }
-    }
 
-    override fun durationOf(file: File): Long {
+    override suspend fun durationOf(file: File): Long = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
-        return try {
+        try {
             retriever.setDataSource(file.absolutePath)
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
+            // setDataSource throws this for an unreadable/invalid file.
+            Log.e(TAG, "Failed to read duration for ${file.name}", e)
+            0L
+        } catch (e: RuntimeException) {
+            // MediaMetadataRetriever surfaces decode failures as bare RuntimeExceptions.
             Log.e(TAG, "Failed to read duration for ${file.name}", e)
             0L
         } finally {
@@ -101,10 +133,10 @@ class VideoStorageRepositoryImpl(
         }
     }
 
-    override fun loadRecordedVideos(): List<RecordedVideo> {
+    override suspend fun loadRecordedVideos(): List<RecordedVideo> = withContext(Dispatchers.IO) {
         val raws = loadFrom(videosDir, prefix = "clip_", kind = VideoKind.RAW)
         val boomerangs = loadFrom(boomerangsDir, prefix = "boom_", kind = VideoKind.BOOMERANG)
-        return (raws + boomerangs).sortedByDescending { it.id } // Newest first
+        (raws + boomerangs).sortedByDescending { it.id } // Newest first
     }
 
     /**
@@ -126,22 +158,27 @@ class VideoStorageRepositoryImpl(
                 try {
                     thumbnailsDir.mkdirs()
                     extractThumbnail(file, thumbFile)
-                } catch (e: Exception) {
+                } catch (e: IOException) {
                     Log.e(TAG, "Failed to extract on-demand thumbnail for ${file.name}", e)
                     // Fall through: still list the clip, just with a (possibly missing) thumb path.
+                } catch (e: RuntimeException) {
+                    // MediaMetadataRetriever.setDataSource / decode failures surface as runtime
+                    // exceptions (e.g. IllegalArgumentException) — still list the clip.
+                    Log.e(TAG, "Failed to extract on-demand thumbnail for ${file.name}", e)
                 }
             }
             RecordedVideo(id, file.absolutePath, thumbFile.absolutePath, kind, sourceRawId)
         }
     }
 
-    override fun deleteVideo(video: RecordedVideo) {
+    override suspend fun deleteVideo(video: RecordedVideo) = withContext(Dispatchers.IO) {
         try {
             File(video.videoPath).takeIf { it.exists() }?.delete()
             File(video.thumbnailPath).takeIf { it.exists() }?.delete()
-        } catch (e: Exception) {
+        } catch (e: SecurityException) {
             Log.e(TAG, "Failed to delete video ${video.id}", e)
         }
+        Unit
     }
 
     /**

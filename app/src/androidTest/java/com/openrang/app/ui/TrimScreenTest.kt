@@ -1,16 +1,22 @@
 package com.openrang.app.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertRangeInfoEquals
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
@@ -90,5 +96,37 @@ class TrimScreenTest {
         setContent()
         composeTestRule.onNodeWithTag("trim_back").performClick()
         composeTestRule.onNodeWithText("Discard this clip?").assertIsDisplayed()
+    }
+
+    // ── Accessibility: the custom trim handles must expose adjustable semantics (not be invisible
+    //    to TalkBack). Each handle is a labelled, range-valued node with a SetProgress action. ──
+
+    @Test
+    fun trimHandles_exposeAdjustableRangeSemantics() {
+        setContent(durationMs = 4_000L, startMs = 0L, endMs = 4_000L)
+
+        composeTestRule.onNodeWithContentDescription("Trim start")
+            .assertRangeInfoEquals(ProgressBarRangeInfo(0f, 0f..4_000f))
+        composeTestRule.onNodeWithContentDescription("Trim end")
+            .assertRangeInfoEquals(ProgressBarRangeInfo(4_000f, 0f..4_000f))
+    }
+
+    @Test
+    fun trimStartHandle_setProgressAction_commitsClampedValue() {
+        var committedStart = -1L
+        var committedEnd = -1L
+        setContent(
+            durationMs = 4_000L,
+            startMs = 0L,
+            endMs = 4_000L,
+            onCommitTrim = { s, e -> committedStart = s; committedEnd = e },
+        )
+
+        // A TalkBack "set value" gesture routes through the SetProgress action and must move + commit.
+        composeTestRule.onNodeWithContentDescription("Trim start")
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(1_000f) }
+
+        assertEquals(1_000L, committedStart)
+        assertEquals(4_000L, committedEnd)
     }
 }

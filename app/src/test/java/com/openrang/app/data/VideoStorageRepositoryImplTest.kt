@@ -8,6 +8,7 @@ import io.mockk.mockkConstructor
 import io.mockk.mockkStatic
 import io.mockk.Runs
 import io.mockk.unmockkAll
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -88,7 +89,7 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `promoteScratchToRaw copies the scratch into videos and reports a RAW`() {
+    fun `promoteScratchToRaw copies the scratch into videos and reports a RAW`() = runBlocking {
         mockRetriever()
         val scratch = repository.createScratchCapture()
         scratch.file.parentFile?.mkdirs()
@@ -130,7 +131,16 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `registerBoomerang reports a BOOMERANG carrying its source raw id`() {
+    fun `allocateBoomerangFile mints unique filenames even within the same millisecond`() {
+        // A tight loop hits same-wall-clock-ms collisions; the monotonic id generator must still
+        // hand out distinct timestamps, or two boomerangs saved together would overwrite each other.
+        val names = (0 until 1_000).map { repository.allocateBoomerangFile(sourceRawId = 42L).name }
+
+        assertEquals(names.size, names.toSet().size) // all unique
+    }
+
+    @Test
+    fun `registerBoomerang reports a BOOMERANG carrying its source raw id`() = runBlocking {
         mockRetriever()
         val file = repository.allocateBoomerangFile(sourceRawId = 777L)
         file.parentFile?.mkdirs()
@@ -145,7 +155,7 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `durationOf reads the media duration metadata`() {
+    fun `durationOf reads the media duration metadata`() = runBlocking {
         mockRetriever(durationMs = "2500")
         val f = File(cacheDir, "any.mp4").apply { writeBytes(ByteArray(4)) }
 
@@ -153,7 +163,7 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `loadRecordedVideos includes boomerangs and parses the source raw id`() {
+    fun `loadRecordedVideos includes boomerangs and parses the source raw id`() = runBlocking {
         // Seed a raw + a boomerang (both with thumbnails so the lazy retriever path is skipped).
         val videos = videosDir().apply { mkdirs() }
         val booms = File(filesDir, "boomerangs").apply { mkdirs() }
@@ -175,12 +185,12 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `loadRecordedVideos returns empty when videos dir is missing`() {
+    fun `loadRecordedVideos returns empty when videos dir is missing`() = runBlocking {
         assertTrue(repository.loadRecordedVideos().isEmpty())
     }
 
     @Test
-    fun `loadRecordedVideos returns clips newest first`() {
+    fun `loadRecordedVideos returns clips newest first`() = runBlocking {
         seedClipWithThumbnail(100L)
         seedClipWithThumbnail(300L)
         seedClipWithThumbnail(200L)
@@ -193,7 +203,7 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `loadRecordedVideos ignores non-clip files`() {
+    fun `loadRecordedVideos ignores non-clip files`() = runBlocking {
         val videos = videosDir().apply { mkdirs() }
         thumbnailsDir().mkdirs()
         File(videos, "notes.txt").writeBytes(ByteArray(4))
@@ -206,7 +216,7 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `loadRecordedVideos still lists a clip whose thumbnail is missing`() {
+    fun `loadRecordedVideos still lists a clip whose thumbnail is missing`() = runBlocking {
         // No thumbnail on disk → lazy extraction path runs. Mock the retriever to yield no frame;
         // the clip must still appear in the list (resilience, not a blank gallery slot).
         mockkConstructor(MediaMetadataRetriever::class)
@@ -222,7 +232,7 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `deleteVideo removes both the video and its thumbnail`() {
+    fun `deleteVideo removes both the video and its thumbnail`() = runBlocking {
         seedClipWithThumbnail(123L)
         val videoFile = File(videosDir(), "clip_123.mp4")
         val thumbFile = File(thumbnailsDir(), "clip_123.jpg")
@@ -237,7 +247,7 @@ class VideoStorageRepositoryImplTest {
     }
 
     @Test
-    fun `deleteVideo with already-missing files does not throw`() {
+    fun `deleteVideo with already-missing files does not throw`() = runBlocking {
         // Should be a no-op, never crash.
         repository.deleteVideo(
             RecordedVideo(

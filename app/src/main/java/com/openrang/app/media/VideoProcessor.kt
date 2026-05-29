@@ -181,7 +181,7 @@ class Media3VideoProcessor(
                 done.await()
             } finally {
                 poller.cancel()
-                transformer.cancel() // safe after completion; aborts the export if we were cancelled mid-flight
+                transformer.cancel() // safe after completion; aborts the export if we were canceled mid-flight
             }
         }
     }

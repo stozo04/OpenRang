@@ -85,14 +85,14 @@ class OpenRangNavHostTest {
     private class NoopVideoStorageRepository : VideoStorageRepository {
         override fun createScratchCapture(): ScratchCapture =
             ScratchCapture("noop", File.createTempFile("navhost_scratch", ".mp4"))
-        override fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo? = null
+        override suspend fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo? = null
         override fun discardScratch(scratch: ScratchCapture) {}
         override fun allocateBoomerangFile(sourceRawId: Long): File =
             File.createTempFile("navhost_boom", ".mp4")
-        override fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo? = null
-        override fun durationOf(file: File): Long = 0L
-        override fun loadRecordedVideos(): List<RecordedVideo> = emptyList()
-        override fun deleteVideo(video: RecordedVideo) {}
+        override suspend fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo? = null
+        override suspend fun durationOf(file: File): Long = 0L
+        override suspend fun loadRecordedVideos(): List<RecordedVideo> = emptyList()
+        override suspend fun deleteVideo(video: RecordedVideo) {}
     }
 
     private class NoopVideoProcessor : VideoProcessor {

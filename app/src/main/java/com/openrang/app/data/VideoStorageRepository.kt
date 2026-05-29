@@ -66,8 +66,11 @@ interface VideoStorageRepository {
      * Copy a finalized [scratch] capture into persistent raw storage and extract a thumbnail.
      * Returns the persisted [RecordedVideo] (kind = [VideoKind.RAW]), or `null` if the copy failed.
      * The scratch file is left in place; callers discard it once they no longer need it.
+     *
+     * `suspend` + off the main thread: copies bytes and decodes a thumbnail frame, so it must never
+     * run on the UI thread (ANR risk — ANDROID_STANDARDS §9).
      */
-    fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo?
+    suspend fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo?
 
     /** Delete the [scratch] file if present. Idempotent — a missing file is not an error. */
     fun discardScratch(scratch: ScratchCapture)
@@ -83,15 +86,24 @@ interface VideoStorageRepository {
      * Register an already-written boomerang [file] (produced at the path from [allocateBoomerangFile]):
      * extract its thumbnail and return its [RecordedVideo] (kind = [VideoKind.BOOMERANG],
      * [RecordedVideo.sourceRawId] = [sourceRawId]). Returns `null` if registration failed.
+     *
+     * `suspend` + off the main thread (decodes a thumbnail frame).
      */
-    fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo?
+    suspend fun registerBoomerang(file: File, sourceRawId: Long): RecordedVideo?
 
-    /** Duration of [file] in milliseconds, or `0L` if it cannot be read. */
-    fun durationOf(file: File): Long
+    /**
+     * Duration of [file] in milliseconds, or `0L` if it cannot be read.
+     * `suspend` + off the main thread (`MediaMetadataRetriever` decode).
+     */
+    suspend fun durationOf(file: File): Long
 
-    /** Returns the recorded clips (raws + boomerangs), newest first. Lazily extracts thumbnails if missing. */
-    fun loadRecordedVideos(): List<RecordedVideo>
+    /**
+     * Returns the recorded clips (raws + boomerangs), newest first. Lazily extracts thumbnails if
+     * missing. `suspend` + off the main thread: scans directories and may decode thumbnail frames,
+     * which grows with the gallery and would jank/ANR on the UI thread (ANDROID_STANDARDS §9).
+     */
+    suspend fun loadRecordedVideos(): List<RecordedVideo>
 
-    /** Removes the video file and its thumbnail. */
-    fun deleteVideo(video: RecordedVideo)
+    /** Removes the video file and its thumbnail. `suspend` + off the main thread (file I/O). */
+    suspend fun deleteVideo(video: RecordedVideo)
 }

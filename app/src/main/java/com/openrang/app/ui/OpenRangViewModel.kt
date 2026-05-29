@@ -171,15 +171,20 @@ class OpenRangViewModel(
                         } else {
                             // Auto-route straight to the Trim screen (no LoopingPreview landing pad).
                             // The scratch stays in cache until the user saves (promote→raw) or discards.
-                            val durationMs = videoStorage.durationOf(outputFile)
-                            Log.d("OpenRangViewModel", "Capture finalized (${durationMs}ms): ${outputFile.absolutePath}")
-                            _editorState.value = TrimState(
-                                sourceFile = outputFile,
-                                sourceDurationMs = durationMs,
-                                trimStartMs = 0L,
-                                trimEndMs = durationMs,
-                            )
-                            _uiState.value = OpenRangUiState.Trim(EditorSource.ScratchClip(scratch.uuid))
+                            // durationOf does a MediaMetadataRetriever decode and this callback runs on
+                            // CameraX's main executor, so read it on a coroutine (Dispatchers.IO inside the
+                            // repo) before routing — never block the main thread (ANDROID_STANDARDS §9).
+                            viewModelScope.launch {
+                                val durationMs = videoStorage.durationOf(outputFile)
+                                Log.d("OpenRangViewModel", "Capture finalized (${durationMs}ms): ${outputFile.absolutePath}")
+                                _editorState.value = TrimState(
+                                    sourceFile = outputFile,
+                                    sourceDurationMs = durationMs,
+                                    trimStartMs = 0L,
+                                    trimEndMs = durationMs,
+                                )
+                                _uiState.value = OpenRangUiState.Trim(EditorSource.ScratchClip(scratch.uuid))
+                            }
                         }
                     }
                 }
@@ -234,12 +239,18 @@ class OpenRangViewModel(
     }
 
     fun loadRecordedVideos() {
-        _recordedVideos.value = videoStorage.loadRecordedVideos()
+        // Directory scan + lazy thumbnail decode runs on Dispatchers.IO inside the repo; launch so
+        // the read never blocks the caller's (main) thread (ANDROID_STANDARDS §9).
+        viewModelScope.launch {
+            _recordedVideos.value = videoStorage.loadRecordedVideos()
+        }
     }
 
     fun deleteVideo(video: RecordedVideo) {
-        videoStorage.deleteVideo(video)
-        loadRecordedVideos()
+        viewModelScope.launch {
+            videoStorage.deleteVideo(video)
+            _recordedVideos.value = videoStorage.loadRecordedVideos()
+        }
     }
 
     fun navigateToGallery() {

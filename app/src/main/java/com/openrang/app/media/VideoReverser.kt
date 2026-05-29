@@ -104,6 +104,9 @@ class VideoReverser(
             val width = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
             val height = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
             val frameRate = inputFormat.frameRateOrDefault()
+            // Preserve the source's rotation hint so the reversed half ends up with the same
+            // orientation metadata the forward half's source carries (Media3 honors it on both).
+            val rotationDegrees = inputFormat.rotationDegreesOrZero()
             val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
                 inputFormat.getLong(MediaFormat.KEY_DURATION)
             } else {
@@ -130,6 +133,7 @@ class VideoReverser(
             }
 
             muxer = MediaMuxer(dest.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            if (rotationDegrees != 0) muxer.setOrientationHint(rotationDegrees)
 
             extractor.seekTo(trimStartMs * 1000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             val endUs = trimEndMs * 1000L
@@ -179,6 +183,9 @@ class VideoReverser(
             val width = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
             val height = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
             val frameRate = inputFormat.frameRateOrDefault()
+            // The intermediate carries the source's rotation hint (pass 1 wrote it); forward it so
+            // the final reversed file keeps it too.
+            val rotationDegrees = inputFormat.rotationDegreesOrZero()
 
             // Collect every frame's presentation time (the intermediate is all-keyframe, so each is seekable).
             val frameTimesUs = ArrayList<Long>()
@@ -211,6 +218,7 @@ class VideoReverser(
                 start()
             }
             muxer = MediaMuxer(dest.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            if (rotationDegrees != 0) muxer.setOrientationHint(rotationDegrees)
 
             // Separate BufferInfos so a decoder dequeue can't clobber the encoder-drain state.
             val decoderInfo = MediaCodec.BufferInfo()
@@ -414,12 +422,8 @@ class VideoReverser(
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    private fun MediaFormat.frameRateOrDefault(): Int =
-        if (containsKey(MediaFormat.KEY_FRAME_RATE)) getInteger(MediaFormat.KEY_FRAME_RATE) else DEFAULT_FRAME_RATE
-
     private companion object {
         const val MIME_AVC = MediaFormat.MIMETYPE_VIDEO_AVC
-        const val DEFAULT_FRAME_RATE = 30
         const val DEFAULT_I_FRAME_INTERVAL = 1
         const val DEQUEUE_TIMEOUT_US = 10_000L
         const val BITS_PER_PIXEL = 4 // ~4 bits/px → solid quality for the short scratch intermediate

@@ -48,6 +48,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -65,6 +73,7 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.io.File
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -218,7 +227,7 @@ fun TrimScreenContent(
                 modifier = Modifier.fillMaxSize(),
             )
             Text(
-                text = "%.1fs".format((endMs - startMs) / 1000f),
+                text = String.format(Locale.US, "%.1fs", (endMs - startMs) / 1000f),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 12.dp)
@@ -272,6 +281,9 @@ fun TrimScreenContent(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) { onNext() }
+                    // Box+clickable carries no implicit role; tell TalkBack this is a button (the
+                    // "NEXT" Text supplies the label).
+                    .semantics { role = Role.Button }
                     .testTag("next_button"),
                 contentAlignment = Alignment.Center,
             ) {
@@ -370,8 +382,30 @@ private fun TrimBar(
                 ),
         )
 
-        TrimThumb(offsetPx = { leftPx(startMs).roundToInt() }, testTag = "trim_handle_start")
-        TrimThumb(offsetPx = { leftPx(endMs).roundToInt() }, testTag = "trim_handle_end")
+        TrimThumb(
+            offsetPx = { leftPx(startMs).roundToInt() },
+            testTag = "trim_handle_start",
+            label = "Trim start",
+            valueMs = startMs,
+            rangeMs = 0f..durationMs.toFloat(),
+            onSetValueMs = { target ->
+                val clamped = target.coerceIn(0L, endMs - minGapMs)
+                onStartDrag(clamped)
+                onDragEnd()
+            },
+        )
+        TrimThumb(
+            offsetPx = { leftPx(endMs).roundToInt() },
+            testTag = "trim_handle_end",
+            label = "Trim end",
+            valueMs = endMs,
+            rangeMs = 0f..durationMs.toFloat(),
+            onSetValueMs = { target ->
+                val clamped = target.coerceIn(startMs + minGapMs, durationMs)
+                onEndDrag(clamped)
+                onDragEnd()
+            },
+        )
 
         // Stable full-width input surface (never moves, so the gesture can't feed back on itself).
         Box(
@@ -405,8 +439,23 @@ private fun TrimBar(
     }
 }
 
+/**
+ * A trim handle. Visually a rounded white thumb; for accessibility it declares its own semantics —
+ * "When adding custom low-level composables, you have to manually provide semantics"
+ * (developer.android.com/develop/ui/compose/accessibility/semantics). It exposes a labelled,
+ * adjustable value ([ProgressBarRangeInfo]) and a `setProgress` action so a TalkBack user can both
+ * read the current handle position and move it (the visual drag lives on the overlay above, which is
+ * pointer-only). The action clamps + commits via [onSetValueMs].
+ */
 @Composable
-private fun TrimThumb(offsetPx: () -> Int, testTag: String) {
+private fun TrimThumb(
+    offsetPx: () -> Int,
+    testTag: String,
+    label: String,
+    valueMs: Long,
+    rangeMs: ClosedFloatingPointRange<Float>,
+    onSetValueMs: (Long) -> Unit,
+) {
     Box(
         modifier = Modifier
             .offset { IntOffset(offsetPx(), 0) }
@@ -414,6 +463,12 @@ private fun TrimThumb(offsetPx: () -> Int, testTag: String) {
             .clip(RoundedCornerShape(8.dp))
             .background(Color.White)
             .border(2.dp, NeonPurple, RoundedCornerShape(8.dp))
+            .semantics(mergeDescendants = true) {
+                contentDescription = label
+                stateDescription = String.format(Locale.US, "%.1f seconds", valueMs / 1000f)
+                progressBarRangeInfo = ProgressBarRangeInfo(valueMs.toFloat(), rangeMs)
+                setProgress { target -> onSetValueMs(target.roundToLong()); true }
+            }
             .testTag(testTag),
     )
 }
