@@ -46,7 +46,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.openrang.app.R
 import com.openrang.app.camera.CameraManager
 import com.openrang.app.data.UserPreferencesRepositoryImpl
 import com.openrang.app.data.VideoStorageRepositoryImpl
