@@ -107,7 +107,7 @@ class OpenRangViewModel(
         }
 
         try {
-            cameraManager.startRecording(outputFile) { event ->
+            val recording = cameraManager.startRecording(outputFile) { event ->
                 when (event) {
                     is VideoRecordEvent.Start -> {
                         Log.d("OpenRangViewModel", "Video burst recording started.")
@@ -133,6 +133,17 @@ class OpenRangViewModel(
                 }
             }
 
+            // startRecording returns null when the VideoCapture use case isn't bound yet (REC-2).
+            // If we launched the timer anyway, no Finalize would ever fire, the auto-cap's
+            // stopRecording() would be a no-op, and the UI would sit stuck in Recording with a full
+            // ring for 30 s. Revert to ReadyToCapture and bail BEFORE starting the timer coroutine.
+            if (recording == null) {
+                Log.e("OpenRangViewModel", "startRecording returned null (camera not bound); aborting capture")
+                clearRecordingTimers()
+                _uiState.value = OpenRangUiState.ReadyToCapture
+                return
+            }
+
             // Drive the elapsed-time flow (for the progress ring + countdown chip) and enforce the
             // 30 s hard cap. When elapsed reaches MAX_RECORDING_MS with no user tap, finalize via the
             // same stopBurstCapture() path as a tap. The loop is bounded by the cap, so a virtual-time
@@ -147,11 +158,27 @@ class OpenRangViewModel(
                 }
                 stopBurstCapture(cameraManager)
             }
-        } catch (e: Exception) {
-            Log.e("OpenRangViewModel", "Failed to start burst capture", e)
-            clearRecordingTimers()
-            _uiState.value = OpenRangUiState.ReadyToCapture
+        } catch (e: IllegalStateException) {
+            // prepareRecording/start: the Recorder already has an unfinished active recording
+            // (PendingRecording.start docs). Also the path withAudioEnabled() takes when the
+            // Recorder doesn't support audio. Recover to idle rather than wedging in Recording.
+            recoverFromFailedStart(e)
+        } catch (e: SecurityException) {
+            // withAudioEnabled() throws this if RECORD_AUDIO was revoked between our permission
+            // check and start() (PendingRecording.withAudioEnabled docs). Recover to idle.
+            recoverFromFailedStart(e)
         }
+        // NOTE: deliberately NOT catching Exception broadly (REC-3 / ANDROID_STANDARDS §3). The
+        // synchronous start path only declares IllegalStateException + SecurityException; CameraX
+        // surfaces IO/encoder failures asynchronously via VideoRecordEvent.Finalize (handled above),
+        // not as a throw. Letting any other throwable propagate keeps real programming errors visible.
+    }
+
+    /** Shared recovery for a synchronous start-recording failure: log, cancel timers, go idle. */
+    private fun recoverFromFailedStart(e: Exception) {
+        Log.e("OpenRangViewModel", "Failed to start burst capture", e)
+        clearRecordingTimers()
+        _uiState.value = OpenRangUiState.ReadyToCapture
     }
 
     fun loadRecordedVideos() {
