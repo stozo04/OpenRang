@@ -1,4 +1,4 @@
-# Lesson 017 — Instrumented tests can't use mockk; and when a mock's return value gains meaning, sweep every call site
+# Lesson 017 — Instrumented tests can't use mockk; and when a mocks return value gains meaning, sweep every call site
 
 > Origin: PR #19 (slice 01 review) — test work for WARNING-1 (NavHost) and REC-2 (null-start guard).
 

@@ -91,7 +91,7 @@ Original maintainer Taner Sener (Arthenica Ltd.) announced retirement on
 [Medium, January 6, 2025](https://tanersener.medium.com/saying-goodbye-to-ffmpegkit-33ae939767e1):
 
 - **Native binaries removed** from Maven Central, CocoaPods, and npm on
-  April 1 2025.
+  April 1, 2025.
 - **Repository archived** on GitHub June 23, 2025 (read-only; no PRs, no issues).
 - **No security patches** going forward.
 
@@ -100,7 +100,7 @@ legal uncertainty after MPEG LA's acquisition by Via-L (codec patent
 exposure). Several community forks exist but none has emerged as a clear
 successor.
 
-Additionally — even before retirement — bringing FFmpegKit into OpenRang
+Additionally, — even before retirement — bringing FFmpegKit into OpenRang
 would have meant:
 
 - **APK size:** ~35–40 MB for a full build; ~13 MB minimal. Compared to

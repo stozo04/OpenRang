@@ -40,7 +40,7 @@ git checkout -b feature/boomerang-slice-01-variable-length
 .\gradlew.bat clean assembleDebug --console=plain
 ```
 
-Confirm `BUILD SUCCESSFUL`, `$LASTEXITCODE -eq 0`, zero `e:` lines. **Do not pipe Gradle through `| tail`** — that gives you the tail's exit code, not gradle's, and a failed build looks green (see CLAUDE.md and `HEY_CLAUDE_ITS_ME.md`). A green baseline now means any later failure is unambiguously yours.
+Confirm `BUILD SUCCESSFUL`, `$LASTEXITCODE -eq 0`, zero `e:` lines. **Do not pipe Gradle through `| tail`** — that gives you the tail's exit code, not Gradle's, and a failed build looks green (see CLAUDE.md and `HEY_CLAUDE_ITS_ME.md`). A green baseline now means any later failure is unambiguously yours.
 
 ## Phase 2: Web-verify the moving pieces (before writing any code)
 
@@ -101,7 +101,7 @@ Boot an emulator (or use Steven's Pixel 10 Pro Fold if available — see `HEY_CL
 - Open the PR. Title: `Slice 01 — Variable-length capture (≤30 s)`.
 - Use the acceptance-criteria checklist from `docs/active/boomerang-rollout/01-capture-variable-length.md` §"Acceptance criteria" as the PR description's body, checking each box.
 - Attach the screenshot from Phase 5.
-- In a final paragraph, **honestly state what you could not verify** — anything skipped, anything you couldn't reproduce, anything that worked on the emulator but you couldn't test on a real device. This is the spirit of Lesson 007 and the DoD doc.
+- In a final paragraph, **honestly state what you could not verify** — anything skipped, anything you couldn't reproduce, anything that worked on the emulator, but you couldn't test on a real device. This is the spirit of Lesson 007 and the DoD doc.
 
 After the PR is open, you're done with this session. The next session picks up either the PR review (`pr-reviewer` skill under `.claude/skills/`) or slice 02 (`docs/prompts/boomerang-slice-02-kickoff.md` once that exists).
 
