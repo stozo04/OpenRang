@@ -1,5 +1,6 @@
 package com.openrang.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -99,16 +100,23 @@ fun CameraScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsStateWithLifecycle()
     val isRecording = uiState is OpenRangUiState.Recording
 
-    // Fraction of the 30 s hard cap elapsed; drives the shutter progress ring sweep.
-    val progress = (recordingElapsedMs.toFloat() / OpenRangViewModel.MAX_RECORDING_MS).coerceIn(0f, 1f)
-    // 00:SS countdown for the chip (elapsed side of "MM:SS / 00:30").
-    val elapsedLabel = "%02d:%02d".format(
-        recordingElapsedMs / 60_000,
-        (recordingElapsedMs / 1000) % 60
-    )
+    // REC-1: keep the high-frequency elapsed flow as a raw State and DO NOT read `.value` here in
+    // the screen root. Reading it at the top would re-subscribe this whole composable (AndroidView
+    // viewfinder included) and recompose it ~30×/s. Instead the read is deferred into the lambdas
+    // below, so only the consumers (progress ring in the draw phase, countdown chip) react to ticks.
+    val recordingElapsedState = viewModel.recordingElapsedMs.collectAsStateWithLifecycle()
+
+    // Predictive back is default-on at targetSdk 36, so a mid-record back gesture would otherwise
+    // finish the Activity → onDestroy → shutdown(), silently discarding the in-flight clip. Route it
+    // through the state machine instead: while recording, back stops & finalizes (same as the stop
+    // shutter). Disabled when not recording so back exits the home screen normally (WARNING-2).
+    BackHandler(enabled = isRecording) {
+        viewModel.stopBurstCapture(cameraManager)
+    }
+
+    // Static cap label ("00:30") for the countdown chip — independent of elapsed time.
     val capLabel = "%02d:%02d".format(
         OpenRangViewModel.MAX_RECORDING_MS / 60_000,
         (OpenRangViewModel.MAX_RECORDING_MS / 1000) % 60
@@ -152,33 +160,20 @@ fun CameraScreen(
                 .statusBarsPadding()
                 .padding(top = 12.dp, bottom = 16.dp)
         ) {
-            // Home / Gallery Button — top-left neon gradient circle
-            Box(
-                modifier = Modifier
-                    .padding(start = 16.dp, top = 4.dp)
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(NeonCoral, NeonPurple)
-                        )
-                    )
-                    .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
-                    .clickable { viewModel.navigateToGallery() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_pictures_folder),
-                    contentDescription = "Gallery",
-                    modifier = Modifier.size(20.dp),
-                    tint = Color.White
-                )
-            }
+            // Home / Gallery Button — top-left neon gradient circle.
+            HomeButton(
+                onClick = { viewModel.navigateToGallery() },
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+            )
 
-            // Countdown chip — top-center, recording only.
+            // Countdown chip — top-center, recording only. `text` is a lambda so the elapsed read
+            // (REC-1) is deferred into the chip's own scope; only the chip recomposes on each tick.
             RecordingCountdownChip(
                 visible = isRecording,
-                text = "$elapsedLabel / $capLabel",
+                text = {
+                    val ms = recordingElapsedState.value
+                    "%02d:%02d / %s".format(ms / 60_000, (ms / 1000) % 60, capLabel)
+                },
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -227,10 +222,14 @@ fun CameraScreen(
                     )
                 }
 
-                // Shutter Button: tap-to-start / tap-to-stop, with a progress ring.
+                // Shutter Button: tap-to-start / tap-to-stop, with a progress ring. progressFraction
+                // is a lambda so the elapsed read (REC-1) happens in the ring's draw phase, not here.
                 ShutterButton(
                     isRecording = isRecording,
-                    progressFraction = progress,
+                    progressFraction = {
+                        (recordingElapsedState.value.toFloat() / OpenRangViewModel.MAX_RECORDING_MS)
+                            .coerceIn(0f, 1f)
+                    },
                     onClick = {
                         if (isRecording) {
                             viewModel.stopBurstCapture(cameraManager)
@@ -265,17 +264,55 @@ fun CameraScreen(
 }
 
 /**
+ * Top-left home / gallery button: a neon-gradient circle holding the pictures-folder icon.
+ *
+ * Stateless and hoisted (mirrors [ShutterButton]) so its touch target is testable without the
+ * camera. Sized at 48.dp — the Material/accessibility minimum interactive target (WARNING-3); the
+ * 44.dp it replaced was a pre-launch accessibility-scanner failure. The 20.dp icon is unchanged.
+ */
+@Composable
+fun HomeButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(NeonCoral, NeonPurple)
+                )
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painterResource(id = R.drawable.ic_pictures_folder),
+            contentDescription = "Gallery",
+            modifier = Modifier.size(20.dp),
+            tint = Color.White
+        )
+    }
+}
+
+/**
  * Tap-to-start / tap-to-stop shutter with a progress ring.
  *
  * Stateless and hoisted (mirrors [OnboardingNavigation]) so it can be exercised in Compose UI
  * tests without binding the camera. While [isRecording], a [NeonCoral] ring sweeps clockwise from
  * 12 o'clock proportional to [progressFraction] (0f..1f toward the 30 s cap), the interior dims,
  * and the dot is replaced by a square "stop" glyph.
+ *
+ * [progressFraction] is a lambda, not a value: it is read inside the [Canvas] draw scope (REC-1) so
+ * an elapsed-time tick only triggers a redraw of the ring, never a recomposition of this button or
+ * the screen above it.
  */
 @Composable
 fun ShutterButton(
     isRecording: Boolean,
-    progressFraction: Float,
+    progressFraction: () -> Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -292,7 +329,7 @@ fun ShutterButton(
                 drawArc(
                     color = NeonCoral,
                     startAngle = -90f,
-                    sweepAngle = progressFraction.coerceIn(0f, 1f) * 360f,
+                    sweepAngle = progressFraction().coerceIn(0f, 1f) * 360f,
                     useCenter = false,
                     topLeft = Offset(inset, inset),
                     size = Size(size.width - strokeWidth, size.height - strokeWidth),
@@ -350,11 +387,14 @@ fun ShutterButton(
  * Top-center countdown chip shown only while recording: monospaced `MM:SS / 00:30` on a glass
  * surface (DeepCharcoal 80% over a GlassWhite 20% base). Renders nothing when [visible] is false,
  * so the visibility rule itself is testable (mirrors [OnboardingNavigation]'s hoisted pattern).
+ *
+ * [text] is a lambda, not a value: it is read inside this chip's composition (REC-1) so an
+ * elapsed-time tick recomposes only the chip, never the camera screen above it.
  */
 @Composable
 fun RecordingCountdownChip(
     visible: Boolean,
-    text: String,
+    text: () -> String,
     modifier: Modifier = Modifier
 ) {
     if (!visible) return
@@ -369,7 +409,7 @@ fun RecordingCountdownChip(
                 .testTag("countdown_chip")
         ) {
             Text(
-                text = text,
+                text = text(),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
