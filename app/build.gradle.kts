@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.openrang.app"
+    namespace = "io.github.stozo04.openloop"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.openrang.app"
+        applicationId = "io.github.stozo04.openloop"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
