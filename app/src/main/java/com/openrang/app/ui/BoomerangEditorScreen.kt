@@ -266,11 +266,11 @@ fun BoomerangEditorContent(
 
     // Rebind the playlist whenever the direction, the reversed file, or the trim changes. setMediaItems
     // replaces the whole playlist (no in-place re-clip of a same-URI item, which ExoPlayer dedupes —
-    // slice-02 HANDOFF), then prepare() restarts playback of the new cycle. PlaybackParameters (speed)
-    // are player-wide and survive this rebind, so we don't re-apply speed here. We DO re-apply the
-    // look here (before prepare) so it's guaranteed baked into the rebuilt pipeline.
+    // slice-02 HANDOFF), then prepare() restarts playback of the new cycle. Both the speed
+    // (PlaybackParameters) and the look (setVideoEffects) are player-wide settings, not per-MediaItem,
+    // so they survive this rebind — we don't re-apply either here. The LaunchedEffect(filter) below
+    // owns applying the look.
     LaunchedEffect(mode, reversedFile, trimStartMs, trimEndMs) {
-        exoPlayer.setVideoEffects(filter.toMediaEffects())
         val items = previewPlaylist(sourceFile, trimStartMs, trimEndMs, mode, reversedFile)
         if (items.isEmpty()) {
             exoPlayer.clearMediaItems()
@@ -896,6 +896,10 @@ private fun LookChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    // Cache the per-frame ImageBitmap wrapper and the look's ColorMatrix/ColorFilter so they aren't
+    // re-allocated on every recomposition (Compose best practice: remember expensive calculations).
+    val imageBitmap = remember(thumbnailFrame) { thumbnailFrame?.asImageBitmap() }
+    val colorFilter = remember(look) { look.thumbnailColorFilter() }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.width(72.dp),
@@ -920,12 +924,12 @@ private fun LookChip(
                 .testTag("look_chip_${look.name}"),
             contentAlignment = Alignment.Center,
         ) {
-            if (thumbnailFrame != null) {
+            if (imageBitmap != null) {
                 Image(
-                    bitmap = thumbnailFrame.asImageBitmap(),
+                    bitmap = imageBitmap,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    colorFilter = look.thumbnailColorFilter(),
+                    colorFilter = colorFilter,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
