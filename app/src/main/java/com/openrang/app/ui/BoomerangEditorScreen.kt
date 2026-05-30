@@ -191,6 +191,8 @@ fun BoomerangEditorScreen(
         activeTab = tab.activeTab,
         reversedFile = tab.reversedFile,
         isReversedFileLoading = tab.isReversedFileLoading,
+        reverseFailed = tab.reverseFailed,
+        onRetryReverse = viewModel::ensureReversedSegment,
         onSelectMode = viewModel::updateMode,
         onSpeedChange = viewModel::updateSpeed,
         onFilterChange = viewModel::updateFilter,
@@ -225,6 +227,8 @@ fun BoomerangEditorContent(
     speed: Float = OpenRangViewModel.DEFAULT_SPEED,
     filter: VideoFilter = VideoFilter.ORIGINAL,
     activeTab: EditorTab = EditorTab.DIRECTION,
+    reverseFailed: Boolean = false,
+    onRetryReverse: () -> Unit = {},
     onSpeedChange: (Float) -> Unit = {},
     onFilterChange: (VideoFilter) -> Unit = {},
     onSwitchTab: (EditorTab) -> Unit = {},
@@ -251,9 +255,12 @@ fun BoomerangEditorContent(
     BackHandler { handleBack() }
 
     // The reversed clip is still missing for a mode that needs it → preview can't show the real
-    // direction yet; cover with the shimmer and block Save until it lands.
-    val awaitingReverse = mode.needsReverse && (reversedFile == null || isReversedFileLoading)
-    val saveEnabled = !awaitingReverse
+    // direction yet; cover with the shimmer and block Save until it lands. Once generation has FAILED
+    // (reverseFailed), stop the shimmer and show a retry card instead — a failed reverse must never
+    // leave "Loopifying…" on screen forever (the bug HDR imports exposed).
+    val awaitingReverse = mode.needsReverse && !reverseFailed && (reversedFile == null || isReversedFileLoading)
+    val reverseUnavailable = mode.needsReverse && reverseFailed && reversedFile == null
+    val saveEnabled = !awaitingReverse && !reverseUnavailable
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -373,6 +380,56 @@ fun BoomerangEditorContent(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
                             letterSpacing = 0.5.sp,
+                        )
+                    }
+                }
+            }
+
+            // Reverse generation failed for this clip (e.g. an HDR/codec the device can't tone-map).
+            // Surface it with a retry instead of a permanent shimmer; the user can also pick the
+            // Forward direction, which needs no reverse.
+            if (reverseUnavailable) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .testTag("reverse_failed"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(DeepCharcoal)
+                            .border(1.dp, GlassWhiteBorder, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 28.dp, vertical = 22.dp),
+                    ) {
+                        Text(
+                            text = "Couldn't loop that clip",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Try again, or pick the Forward direction.",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = "TRY AGAIN",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(NeonPurple)
+                                .clickable { onRetryReverse() }
+                                .padding(horizontal = 24.dp, vertical = 10.dp)
+                                .testTag("reverse_retry"),
                         )
                     }
                 }

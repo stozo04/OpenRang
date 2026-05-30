@@ -260,4 +260,46 @@ class VideoStorageRepositoryImplTest {
         assertTrue(repository.loadRecordedVideos().isEmpty())
     }
 
+    // ── Stale-scratch prune (slice 07 / D-8) ──
+
+    private fun scratchDir() = File(cacheDir, "scratch")
+
+    @Test
+    fun `pruneStaleScratch deletes old scratch files and keeps recent ones`() = runBlocking {
+        val scratch = scratchDir().apply { mkdirs() }
+        val old = File(scratch, "raw_old.mp4").apply { writeBytes(ByteArray(4)) }
+        val fresh = File(scratch, "raw_fresh.mp4").apply { writeBytes(ByteArray(4)) }
+
+        val now = System.currentTimeMillis()
+        old.setLastModified(now - 48L * 60 * 60 * 1_000)  // 48 h old
+        fresh.setLastModified(now - 1L * 60 * 60 * 1_000)  //  1 h old
+
+        val deleted = repository.pruneStaleScratch(24L * 60 * 60 * 1_000)
+
+        assertEquals(1, deleted)
+        assertFalse("stale scratch should be deleted", old.exists())
+        assertTrue("recent scratch should survive", fresh.exists())
+    }
+
+    @Test
+    fun `pruneStaleScratch leaves the reversed subdirectory untouched`() = runBlocking {
+        val scratch = scratchDir().apply { mkdirs() }
+        // VideoReverser writes into scratch/reversed/; the prune targets files only, not this dir.
+        val reversed = File(scratch, "reversed").apply { mkdirs() }
+        val reversedClip = File(reversed, "rev_old.mp4").apply { writeBytes(ByteArray(4)) }
+        reversed.setLastModified(System.currentTimeMillis() - 48L * 60 * 60 * 1_000)
+
+        val deleted = repository.pruneStaleScratch(24L * 60 * 60 * 1_000)
+
+        assertEquals(0, deleted)
+        assertTrue("reversed subdirectory must survive", reversed.exists())
+        assertTrue(reversedClip.exists())
+    }
+
+    @Test
+    fun `pruneStaleScratch with no scratch directory returns zero`() = runBlocking {
+        // scratch/ never created — must be a safe no-op, never throw.
+        assertEquals(0, repository.pruneStaleScratch(24L * 60 * 60 * 1_000))
+    }
+
 }

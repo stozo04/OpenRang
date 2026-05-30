@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Permissions needed for the Boomerang functionality -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -41,6 +42,23 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Android Photo Picker backport for API 26–29 (slice 07). On API 33+ the picker is native
+             and on 30–32 it's a system module; on 26–29 this <service> lets Google Play services
+             provide the proper picker UI. Without it the framework still resolves to an
+             ACTION_OPEN_DOCUMENT fallback, so it degrades gracefully. tools:ignore="MissingClass"
+             because the GMS class isn't on our compile classpath. See
+             https://developer.android.com/training/data-storage/shared/photopicker -->
+        <service
+            android:name="com.google.android.gms.metadata.ModuleDependencies"
+            android:enabled="false"
+            android:exported="false"
+            tools:ignore="MissingClass">
+            <intent-filter>
+                <action android:name="com.google.android.gms.metadata.MODULE_DEPENDENCIES" />
+            </intent-filter>
+            <meta-data android:name="photopicker_activity:0:required" android:value="" />
+        </service>
     </application>
 
 </manifest>

@@ -7,9 +7,11 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.openrang.app.camera.CameraManager
+import android.net.Uri
 import com.openrang.app.data.RecordedVideo
 import com.openrang.app.data.ScratchCapture
 import com.openrang.app.data.UserPreferencesRepository
+import com.openrang.app.data.VideoImporter
 import com.openrang.app.data.VideoStorageRepository
 import com.openrang.app.media.BoomerangMode
 import com.openrang.app.media.VideoFilter
@@ -45,11 +47,13 @@ class OpenRangNavHostTest {
                     NoopPreferencesRepository(),
                     NoopVideoStorageRepository(),
                     NoopVideoProcessor(),
+                    NoopVideoImporter(),
                 ),
                 cameraManager = CameraManager(ApplicationProvider.getApplicationContext()),
                 onCheckPermissions = {},
                 onRationaleAcknowledged = {},
                 onOpenAppSettings = {},
+                onImportVideo = {},
             )
         }
     }
@@ -94,6 +98,12 @@ class OpenRangNavHostTest {
         override suspend fun durationOf(file: File): Long = 0L
         override suspend fun loadRecordedVideos(): List<RecordedVideo> = emptyList()
         override suspend fun deleteVideo(video: RecordedVideo) {}
+        override suspend fun pruneStaleScratch(olderThanMs: Long): Int = 0
+    }
+
+    private class NoopVideoImporter : VideoImporter {
+        override suspend fun probeDurationMs(source: Uri): Long = 0L
+        override suspend fun importToFile(source: Uri, dest: File): Boolean = false
     }
 
     private class NoopVideoProcessor : VideoProcessor {

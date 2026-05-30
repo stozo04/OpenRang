@@ -51,7 +51,7 @@ fun ProcessingScreen(
             trackColor = GlassWhite,
         )
         Text(
-            text = "Creating boomerang…",
+            text = "Loopifying…",
             modifier = Modifier.padding(top = 24.dp),
             color = Color.White,
             fontSize = 16.sp,

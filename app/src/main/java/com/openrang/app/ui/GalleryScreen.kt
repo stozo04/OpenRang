@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +48,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -66,7 +69,8 @@ import com.openrang.app.data.RecordedVideo
 @Composable
 fun GalleryScreen(
     viewModel: OpenRangViewModel,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onImportVideo: () -> Unit,
 ) {
     val videos by viewModel.recordedVideos.collectAsStateWithLifecycle()
     var selectedVideo by remember { mutableStateOf<RecordedVideo?>(null) }
@@ -90,7 +94,7 @@ fun GalleryScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // ── Top Bar: back button only ──
+            // ── Top Bar: back (left) + import (right) ──
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -110,6 +114,25 @@ fun GalleryScreen(
                     Icon(
                         painter = painterResource(id = R.drawable.ic_film_slate),
                         contentDescription = "Back to camera",
+                        modifier = Modifier.size(24.dp),
+                        tint = NeonPurple
+                    )
+                }
+
+                // Import button — mirrors the back button's style, anchored opposite it (slice 07).
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(GlassWhite)
+                        .border(2.dp, NeonPurple, CircleShape)
+                        .clickable { onImportVideo() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.VideoLibrary,
+                        contentDescription = stringResource(R.string.gallery_import),
                         modifier = Modifier.size(24.dp),
                         tint = NeonPurple
                     )
@@ -139,6 +162,19 @@ fun GalleryScreen(
                             fontSize = 14.sp,
                             color = Color.White.copy(alpha = 0.35f),
                             textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        // Secondary affordance: import an existing clip instead of recording (slice 07).
+                        Text(
+                            text = stringResource(R.string.gallery_import_empty_state),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeonPurple,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onImportVideo() }
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                         )
                     }
                 }

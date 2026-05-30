@@ -39,6 +39,13 @@ sealed interface OpenRangUiState {
     /** Full-screen spinner shown while [OpenRangViewModel] renders the boomerang (slice 02). */
     object Processing : OpenRangUiState
 
+    /**
+     * Loader shown while a video picked from the library is probed for duration and copied into a
+     * scratch file (slice 07). On success the app routes to [Trim] exactly as a fresh capture would;
+     * on a too-long clip or a copy failure it returns to [Gallery] with a dialog / snackbar.
+     */
+    object ImportingVideo : OpenRangUiState
+
     /** Looping playback of a finished clip. Retained as the gallery playback target (slice 07). */
     data class LoopingPreview(val videoPath: String, val playbackSpeed: Float) : OpenRangUiState
     object Gallery : OpenRangUiState
@@ -97,6 +104,11 @@ enum class EditorTab {
  * [reversedFile] caches the reversed clip the preview plays for any reverse-containing [mode]; it is
  * produced once per trim (shared with the render via the same `VideoProcessor`) and is `null` until
  * generated. [isReversedFileLoading] drives the "Loopifying…" shimmer over the preview.
+ *
+ * [reverseFailed] is set when reverse generation throws (e.g. an imported clip whose codec the device
+ * can't tone-map/transcode). It exists so a failed reverse stops the shimmer and surfaces a retry
+ * instead of leaving "Loopifying…" on screen forever — the shimmer is gated on `reversedFile == null`,
+ * so without this flag a failure would hang the editor (the bug imports first exposed).
  */
 data class EditorTabState(
     val mode: BoomerangMode = BoomerangMode.FORWARD_THEN_REVERSE,
@@ -105,4 +117,5 @@ data class EditorTabState(
     val activeTab: EditorTab = EditorTab.DIRECTION,
     val reversedFile: File? = null,
     val isReversedFileLoading: Boolean = false,
+    val reverseFailed: Boolean = false,
 )

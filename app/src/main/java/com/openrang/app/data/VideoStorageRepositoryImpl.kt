@@ -88,6 +88,23 @@ class VideoStorageRepositoryImpl(
         }
     }
 
+    override suspend fun pruneStaleScratch(olderThanMs: Long): Int = withContext(Dispatchers.IO) {
+        val cutoff = System.currentTimeMillis() - olderThanMs
+        // Only regular files directly under scratch/ (the raw_<uuid>.mp4 captures/imports); the
+        // reversed/ subdirectory is a directory, so isFile skips it.
+        val files = scratchDir.listFiles() ?: return@withContext 0
+        var deleted = 0
+        for (file in files) {
+            try {
+                if (file.isFile && file.lastModified() < cutoff && file.delete()) deleted++
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Failed to prune stale scratch ${file.name}", e)
+            }
+        }
+        if (deleted > 0) Log.d(TAG, "Pruned $deleted stale scratch file(s)")
+        deleted
+    }
+
     override fun allocateBoomerangFile(sourceRawId: Long): File {
         val timestamp = nextTimestamp()
         return File(boomerangsDir.apply { mkdirs() }, "boom_${timestamp}_from_$sourceRawId.mp4")
