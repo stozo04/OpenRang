@@ -6,7 +6,7 @@ Copy everything below the line into a fresh Claude Code session with the OpenRan
 
 ## Session Prompt — Implement Boomerang Slice 03
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0.
 
 The app currently captures variable-length clips up to 30 s (slice 01), auto-routes to a Trim screen, and renders default boomerangs (slice 02). This slice is where the user gets **expression** for the first time — they can pick how their boomerang plays. The tabbed editor screen lands in this slice, but with only the Direction tab populated. Speed (slice 04) and Reps (slice 05) layer on later.
 
@@ -104,7 +104,7 @@ Walk the slice 03 manual QA checklist on emulator AND Pixel 10 Pro Fold:
 
 ## Phase 6: Open the PR
 
-- Push the branch to `stozo04/OpenRang`.
+- Push the branch to `stozo04/OpenLoop`.
 - Open the PR. Title: `Slice 03 — Tabbed Editor + Direction tab`.
 - PR description: acceptance-criteria checklist from `docs/active/boomerang-rollout/03-editor-direction-tab.md` §"Acceptance criteria", each box checked.
 - Include the reverse-shimmer latency measurements from Phase 5 in the description.

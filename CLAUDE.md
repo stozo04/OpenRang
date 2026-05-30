@@ -2,7 +2,7 @@
 
 ## Owner
 
-Steven Gates · gates.steven@gmail.com · GitHub: [stozo04](https://github.com/stozo04/OpenRang)
+Steven Gates · gates.steven@gmail.com · GitHub: [stozo04](https://github.com/stozo04/OpenLoop)
 Solo developer. Android/Kotlin. Comfortable making architecture decisions, reviewing code, and shipping production-quality UI.
 
 Tools: Android Studio, Git/GitHub, Supabase, Google services (Gmail, Calendar, Drive).
@@ -81,7 +81,7 @@ All project documentation (`.md` files) belongs in the `docs/` directory — not
 | Build | Gradle 9.0.0, AGP 8.13.2 | — |
 | Target | compileSdk 36, minSdk 26, targetSdk 36 | — |
 
-> **SDK status (shipped via [Issue #7](https://github.com/stozo04/OpenRang/issues/7)):** the app targets **API 36 (Android 16)** — `compileSdk`/`targetSdk` 36, `minSdk` stays 26 — clearing Google Play's target-API floor (currently API 35). The upgrade also moved to Kotlin 2.3.21 + the Compose Compiler Gradle plugin (required by the latest CameraX/Media3), and the native libraries are 16 KB page-aligned (uncompressed packaging). Behavior-change detail: [`docs/android-16/`](docs/android-16/README.md). Play's requirement: [Target API Level Requirements](https://developer.android.com/google/play/requirements/target-sdk).
+> **SDK status (shipped via [Issue #7](https://github.com/stozo04/OpenLoop/issues/7)):** the app targets **API 36 (Android 16)** — `compileSdk`/`targetSdk` 36, `minSdk` stays 26 — clearing Google Play's target-API floor (currently API 35). The upgrade also moved to Kotlin 2.3.21 + the Compose Compiler Gradle plugin (required by the latest CameraX/Media3), and the native libraries are 16 KB page-aligned (uncompressed packaging). Behavior-change detail: [`docs/android-16/`](docs/android-16/README.md). Play's requirement: [Target API Level Requirements](https://developer.android.com/google/play/requirements/target-sdk).
 
 ### Source Layout
 

@@ -6,7 +6,7 @@ Copy everything below the line into a fresh Claude session with the OpenRang fol
 
 ## Session Prompt — Address PR Review Feedback & Re-Review
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops. Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04).
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops. Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04).
 
 ## Critical Rule — Do Not Trust Your Training Data
 
@@ -33,7 +33,7 @@ Also check `docs/active/` for the feature's IMPLEMENTATION.md if one exists.
 
 ## Phase 1: Read the PR Review Feedback
 
-1. Go to the PR on `stozo04/OpenRang` (use GitHub tools — `pull_request_read` with method `get_comments`)
+1. Go to the PR on `stozo04/OpenLoop` (use GitHub tools — `pull_request_read` with method `get_comments`)
 2. Find the automated review comment (from Claude, titled "PR Review — Google Android Standards Compliance")
 3. Read every FAIL, WARNING, and RECOMMENDATION carefully
 

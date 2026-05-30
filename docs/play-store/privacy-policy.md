@@ -3,7 +3,7 @@
 **Effective date:** 2026-05-30
 **App:** OpenLoop (package `io.github.stozo04.openloop`)
 **Developer:** Steven Gates · gates.steven@gmail.com
-**Source code:** https://github.com/stozo04/OpenRang (open source, Apache License 2.0)
+**Source code:** https://github.com/stozo04/OpenLoop (open source, Apache License 2.0)
 
 ---
 
@@ -76,8 +76,8 @@ Questions about this policy: **gates.steven@gmail.com**
 > **How to publish this (so you can paste a URL into the Play Console):**
 > The Play Console requires a publicly reachable **URL**, not a file. Easiest options:
 > 1. **GitHub Pages** — enable Pages for the `OpenLoop` repo and host this page, e.g.
->    `https://stozo04.github.io/OpenRang/privacy-policy`.
+>    `https://stozo04.github.io/OpenLoop/privacy-policy`.
 > 2. **Direct GitHub link** — the rendered file URL on the default branch also works as a stop-gap:
->    `https://github.com/stozo04/OpenRang/blob/main/docs/play-store/privacy-policy.md`.
+>    `https://github.com/stozo04/OpenLoop/blob/main/docs/play-store/privacy-policy.md`.
 > Paste whichever URL you host into **Play Console → Policy → App content → Privacy policy**, and into
 > the **store listing** Privacy Policy field.

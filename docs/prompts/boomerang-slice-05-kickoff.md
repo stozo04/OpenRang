@@ -6,7 +6,7 @@ Copy everything below the line into a fresh Claude Code session with the OpenRan
 
 ## Session Prompt — Implement Boomerang Slice 05
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0.
 
 The editor has Direction and Speed tabs (slices 03–04 shipped). After this slice the editor is **feature-complete** — direction + speed + reps all dial-able, plus the long-boomerang warning that protects against accidental 5-minute renders.
 
@@ -96,7 +96,7 @@ Walk the slice 05 manual QA on emulator + Pixel 10 Pro Fold:
 
 ## Phase 6: Open the PR
 
-- Push to `stozo04/OpenRang`.
+- Push to `stozo04/OpenLoop`.
 - PR title: `Slice 05 — Repetitions tab`.
 - PR description: acceptance-criteria checklist from `docs/active/boomerang-rollout/05-editor-repetitions-tab.md`, each box checked. Include the largest output file size + duration observed.
 - Attach the screenshot.

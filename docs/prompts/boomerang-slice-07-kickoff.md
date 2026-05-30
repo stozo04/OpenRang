@@ -6,7 +6,7 @@ Copy everything below the line into a fresh Claude Code session with the OpenRan
 
 ## Session Prompt — Implement Boomerang Slice 07
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0.
 
 The boomerang flow works end-to-end for fresh captures: capture → trim → editor → save → share (slices 01–06 shipped). But every prior slice operates on a **fresh capture only** — there is no path to boomerang a clip that's already in the gallery. This slice closes that loop and ships the gallery distinction between raws and boomerangs. After this merges, **OpenRang v1 is done**.
 
@@ -111,7 +111,7 @@ All attached to the PR.
 
 ## Phase 6: Open the PR
 
-- Push to `stozo04/OpenRang`.
+- Push to `stozo04/OpenLoop`.
 - PR title: `Slice 07 — Gallery tap-to-edit + raw/boomerang distinction (v1 complete)`.
 - PR description: acceptance-criteria checklist from `docs/active/boomerang-rollout/07-gallery-tap-to-edit.md`, each box checked.
 - Attach the screenshots.

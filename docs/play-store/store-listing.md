@@ -39,7 +39,7 @@ IMPORT WITHOUT GIVING UP YOUR LIBRARY
 Importing uses Android's Photo Picker, so you choose one video to bring in without granting access to your whole gallery — and with no storage permission.
 
 OPEN SOURCE
-OpenLoop is free and open source under the Apache 2.0 license. You can read every line, file issues, or contribute: https://github.com/stozo04/OpenRang
+OpenLoop is free and open source under the Apache 2.0 license. You can read every line, file issues, or contribute: https://github.com/stozo04/OpenLoop
 
 PERMISSIONS
 • Camera — to record video in the app.
@@ -57,7 +57,7 @@ Made for people who just want to point, tap, and loop.
 | Tags | boomerang, video loop, slow motion, video editor (pick from Console's tag list) |
 | Contact email | gates.steven@gmail.com |
 | Privacy policy URL | *(host `privacy-policy.md` — see its footer — and paste the URL)* |
-| Website (optional) | https://github.com/stozo04/OpenRang |
+| Website (optional) | https://github.com/stozo04/OpenLoop |
 
 ---
 

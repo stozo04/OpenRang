@@ -6,7 +6,7 @@ Copy everything below the line into a fresh Claude Code session with the OpenRan
 
 ## Session Prompt — Implement Boomerang Slice 02
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0.
 
 The app currently captures variable-length clips up to 30 s (slice 01 shipped). There is still no boomerang generation. This slice is where boomerangs *start existing* — but with no editor tabs yet. It is the largest, riskiest slice in the rollout: it introduces the new `VideoReverser` class (hand-rolled two-pass MediaCodec), the new `VideoProcessor` class (Media3 Composition), the new `Trim` screen, the per-UUID scratch file model, and the `boomerangs/` directory + `RecordedVideo.kind`. Plan for it.
 
@@ -133,7 +133,7 @@ Boot an emulator (or Pixel 10 Pro Fold per `HEY_CLAUDE_ITS_ME.md`), install the 
 
 ## Phase 6: Open the PR
 
-- Push the branch to `stozo04/OpenRang`.
+- Push the branch to `stozo04/OpenLoop`.
 - Open the PR. Title: `Slice 02 — Auto-route to Trim screen + default-render Save`.
 - Use the acceptance-criteria checklist from `docs/active/boomerang-rollout/02-auto-route-trim-and-default-save.md` §"Acceptance criteria" as the PR description's body. Check each box, including the `VideoReverser` cache + cleanup verifications and the latency measurement.
 - Attach the screenshot from Phase 5.

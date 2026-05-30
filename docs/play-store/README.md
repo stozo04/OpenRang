@@ -44,9 +44,8 @@ in**. Keep these in sync if the app's behavior changes.
 ---
 
 ## Notes
-- **GitHub URLs** in these docs point at `github.com/stozo04/OpenRang` because that's the repo's
-  current name; they resolve today. If you rename the repo to `OpenLoop`, GitHub auto-redirects the
-  old URLs, so nothing breaks — update them at your leisure.
+- **GitHub URLs** point at `github.com/stozo04/OpenLoop` (the repo's current name). It was formerly
+  `OpenRang`; GitHub auto-redirects the old URLs, so any older links still resolve.
 - These docs declare **no data collection**. That stays true only while the app has no `INTERNET`
   permission and no analytics/ads/crash SDKs. If that ever changes, update `data-safety.md` and
   `privacy-policy.md` **before** that version ships.

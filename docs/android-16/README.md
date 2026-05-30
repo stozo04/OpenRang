@@ -8,7 +8,7 @@ Google search.
 This hub is **evergreen reference**: unlike a feature folder, it does **not** move to
 `docs/completed/` when the upgrade ships. The actionable, ordered upgrade plan lives separately in
 [`docs/completed/007-target-sdk-upgrade/IMPLEMENTATION.md`](../completed/007-target-sdk-upgrade/IMPLEMENTATION.md)
-(GitHub Issue [#7](https://github.com/stozo04/OpenRang/issues/7)).
+(GitHub Issue [#7](https://github.com/stozo04/OpenLoop/issues/7)).
 
 > **Verified 2026-05-28.** Google's pages change. Every file records the source URL and fetch date
 > in its header. **Re-verify against the live page before acting** — see the dated note in each file.

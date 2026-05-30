@@ -38,7 +38,7 @@ Every boomerang/loop app on the Play Store either costs money, runs ads, or send
 | **State**       | MVVM + StateFlow                  | Single ViewModel, sealed-interface state machine, unidirectional data flow          |
 | **Testing**     | JUnit 4 + MockK + Compose UI Test | Unit tests for ViewModel logic, UI regression tests for layout-critical composables |
 
-**SDK levels:** `minSdk 26` (Android 8.0) · `compileSdk 36` · `targetSdk 36` — upgraded to **API 36 (Android 16)** for Google Play readiness (`minSdk` stays 26), tracked in [Issue #7](https://github.com/stozo04/OpenRang/issues/7), with the full behavior-change breakdown in [`docs/android-16/`](docs/android-16/README.md). Google Play's target-API rule: [Target API Level Requirements](https://developer.android.com/google/play/requirements/target-sdk).
+**SDK levels:** `minSdk 26` (Android 8.0) · `compileSdk 36` · `targetSdk 36` — upgraded to **API 36 (Android 16)** for Google Play readiness (`minSdk` stays 26), tracked in [Issue #7](https://github.com/stozo04/OpenLoop/issues/7), with the full behavior-change breakdown in [`docs/android-16/`](docs/android-16/README.md). Google Play's target-API rule: [Target API Level Requirements](https://developer.android.com/google/play/requirements/target-sdk).
 
 ### State Machine
 
@@ -68,7 +68,7 @@ io.github.stozo04.openloop/
 
 1. **Clone it:**
    ```bash
-   git clone https://github.com/stozo04/OpenRang.git
+   git clone https://github.com/stozo04/OpenLoop.git
    ```
 
 2. **Open in Android Studio** (Hedgehog or newer recommended)
@@ -215,7 +215,7 @@ Android Studio's *Analyze → Inspect Code* produces, run headlessly. There are 
 
 When a PR gets review feedback, open a new Cowork session with the OpenLoop folder mounted and say:
 
-> Start addressing PR feedback following `docs/prompts/PR-FEEDBACK-RESOLUTION.md` — here is the PR: https://github.com/stozo04/OpenRang/pull/XX
+> Start addressing PR feedback following `docs/prompts/PR-FEEDBACK-RESOLUTION.md` — here is the PR: https://github.com/stozo04/OpenLoop/pull/XX
 
 Replace `XX` with your PR number. The agent will read the review comments, web-search Google's latest standards to verify each finding, fix the code, push, post a response comment explaining what was fixed and why, then run a fresh review to confirm zero FAILs.
 

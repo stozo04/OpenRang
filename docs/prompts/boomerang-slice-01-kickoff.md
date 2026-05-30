@@ -1,6 +1,6 @@
 ## Session Prompt — Implement Boomerang Slice 01
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0.
 
 The app is in active development. Today's app surface is: 3-step Onboarding → live camera viewfinder with front/back lens toggle → 1.5 s auto-stop burst recording → captured clip lands in a Gallery view. There is no boomerang generation yet. The full boomerang feature is being rolled out in **7 thin vertical slices**. This session is for **slice 01** — the foundational slice that every later slice depends on.
 
@@ -97,7 +97,7 @@ Boot an emulator (or use Steven's Pixel 10 Pro Fold if available — see `HEY_CL
 
 ## Phase 6: Open the PR
 
-- Push the branch to `stozo04/OpenRang`.
+- Push the branch to `stozo04/OpenLoop`.
 - Open the PR. Title: `Slice 01 — Variable-length capture (≤30 s)`.
 - Use the acceptance-criteria checklist from `docs/active/boomerang-rollout/01-capture-variable-length.md` §"Acceptance criteria" as the PR description's body, checking each box.
 - Attach the screenshot from Phase 5.

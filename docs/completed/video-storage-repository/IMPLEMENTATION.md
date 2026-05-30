@@ -1,6 +1,6 @@
 # VideoStorageRepository — Remove Context from OpenRangViewModel
 
-**Issue:** [#10](https://github.com/stozo04/OpenRang/issues/10) · **Branch:** `feature/video-storage-repository` · **Shipped via:** PR #17 · **Labels:** architecture, refactor, tech-debt
+**Issue:** [#10](https://github.com/stozo04/OpenLoop/issues/10) · **Branch:** `feature/video-storage-repository` · **Shipped via:** PR #17 · **Labels:** architecture, refactor, tech-debt
 
 ## Problem statement
 

@@ -1,6 +1,6 @@
 # 007 — Target SDK Upgrade (Android 14 → Android 16) for Google Play
 
-**GitHub Issue:** [#7 — Upgrade targetSdk to meet Google Play requirements](https://github.com/stozo04/OpenRang/issues/7)
+**GitHub Issue:** [#7 — Upgrade targetSdk to meet Google Play requirements](https://github.com/stozo04/OpenLoop/issues/7)
 **Branch:** implementation landed on `feature/target-sdk-36` (PR #15). The docs-prep that preceded it shipped on `feature/update-api` (PR #13) — see the [doc-prep record](./DOC-PREP.md), now archived in this same folder.
 **Status:** IMPLEMENTED on branch `feature/target-sdk-36` — ready for review. Build (debug + release/R8) is green, unit (24) + instrumented (10) tests pass, and native libs verified 16 KB-aligned. On-device ≥600dp large-screen visual pass still recommended (see "Implementation outcome" below). Behavior-change research is captured in the [Android 16 hub](../../android-16/README.md).
 **Last updated:** 2026-05-28
