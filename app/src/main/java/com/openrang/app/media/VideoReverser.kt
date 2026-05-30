@@ -2,9 +2,11 @@ package com.openrang.app.media
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.os.Build
 import android.view.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -102,8 +104,13 @@ class VideoReverser(
             extractor.selectTrack(trackIndex)
             val inputFormat = extractor.getTrackFormat(trackIndex)
 
-            val width = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
-            val height = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
+            val srcWidth = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
+            val srcHeight = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
+            // Downscale a 4K/8K source to a ≤1080p short side (cappedToShortSide). The decoder renders
+            // its native-size frames onto the smaller encoder input Surface, which scales them down —
+            // so the encode stays fast + within the encoder's level limit, and matches the render's
+            // resolution cap (so the forward and reversed halves are the same size).
+            val (width, height) = cappedToShortSide(srcWidth, srcHeight)
             val frameRate = inputFormat.frameRateOrDefault()
             // Capture the source's rotation hint, then NEUTRALIZE it on the format handed to the
             // decoder. In Surface-output mode MediaCodec auto-applies KEY_ROTATION, and whether the
@@ -115,6 +122,7 @@ class VideoReverser(
             // a real portrait recording (see docs/lessons_learned/HANDOFF + SECOND-REVIEW notes).
             val rotationDegrees = inputFormat.rotationDegreesOrZero()
             inputFormat.setInteger(MediaFormat.KEY_ROTATION, 0)
+            inputFormat.requestSdrToneMapping() // HDR/10-bit source → SDR for the 8-bit AVC encoder
             val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
                 inputFormat.getLong(MediaFormat.KEY_DURATION)
             } else {
@@ -129,7 +137,7 @@ class VideoReverser(
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0)
             }
 
-            encoder = MediaCodec.createEncoderByType(MIME_AVC).apply {
+            encoder = selectAvcEncoder(encoderFormat).apply {
                 configure(encoderFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
             inputSurface = encoder.createInputSurface()
@@ -197,6 +205,9 @@ class VideoReverser(
             // and re-apply it on the muxer below.
             val rotationDegrees = inputFormat.rotationDegreesOrZero()
             inputFormat.setInteger(MediaFormat.KEY_ROTATION, 0)
+            // Pass-1's intermediate is already SDR AVC, so this is normally a no-op here; kept for
+            // symmetry and to cover the (rare) case of a non-tone-mapped intermediate.
+            inputFormat.requestSdrToneMapping()
 
             // Collect every frame's presentation time (the intermediate is all-keyframe, so each is seekable).
             val frameTimesUs = ArrayList<Long>()
@@ -218,7 +229,7 @@ class VideoReverser(
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, DEFAULT_I_FRAME_INTERVAL)
             }
-            encoder = MediaCodec.createEncoderByType(MIME_AVC).apply {
+            encoder = selectAvcEncoder(encoderFormat).apply {
                 configure(encoderFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
             inputSurface = encoder.createInputSurface()
@@ -391,7 +402,11 @@ class VideoReverser(
         while (true) {
             val outIndex = encoder.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US)
             when {
-                outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> if (!endOfStream) return started else { /* keep draining at EOS */ }
+                // Nothing ready from the encoder this poll. Before EOS, return so the caller's loop can
+                // feed/decode more. At EOS we fall through to the explicit exit just below — the old
+                // `else { /* keep draining */ }` was a no-op; draining actually continues across the
+                // caller's outer loop, not inside this function.
+                outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> if (!endOfStream) return started
                 outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     if (!started) started = onTrackReady(encoder.outputFormat)
                 }
@@ -414,6 +429,50 @@ class VideoReverser(
                 return started
             }
         }
+    }
+
+    /**
+     * Ask the decoder to tone-map an HDR (HLG/PQ, 10-bit) source down to 8-bit SDR as it decodes onto
+     * the encoder's input [Surface]. Without this, an imported HDR clip's 10-bit frames reach the
+     * SDR-only AVC encoder, and it fails with "AVC does not support 10-bit input" (codec err 22), which
+     * is what wedged the editor on "Loopifying…" for HDR imports.
+     *
+     * [MediaFormat.KEY_COLOR_TRANSFER_REQUEST] is API 31+ (verified on developer.android.com — added
+     * in API 31; see the tone-mapping guide), so this is a no-op below 31 — and a no-op on SDR sources
+     * at any level (the decoder only tone-maps actual HDR input). On a device/codec that doesn't honor
+     * the request the reverse still fails, but now degrades gracefully (the editor surfaces a retry
+     * instead of hanging) rather than spinning forever.
+     */
+    private fun MediaFormat.requestSdrToneMapping() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            setInteger(MediaFormat.KEY_COLOR_TRANSFER_REQUEST, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+        }
+    }
+
+    /**
+     * Create an AVC encoder for [format], preferring a hardware-accelerated one that supports the
+     * format. On some devices `createEncoderByType` defaults to the *software* encoder
+     * (`c2.google.avc.encoder`), which encodes a high-res / high-fps clip frame-by-frame so slowly the
+     * render appears to hang. Picking a hardware encoder makes a 4K/60 import finish in seconds.
+     * Falls back to the platform default for the type if no supporting hardware encoder is found.
+     */
+    private fun selectAvcEncoder(format: MediaFormat): MediaCodec {
+        val name = runCatching {
+            val infos = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            val supporting = infos.filter { info ->
+                info.isEncoder &&
+                    info.supportedTypes.any { it.equals(MIME_AVC, ignoreCase = true) } &&
+                    runCatching {
+                        info.getCapabilitiesForType(MIME_AVC).isFormatSupported(format)
+                    }.getOrDefault(false)
+            }
+            val hardware = supporting.firstOrNull {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && it.isHardwareAccelerated
+            }
+            (hardware ?: supporting.firstOrNull())?.name
+        }.getOrNull()
+        return if (name != null) MediaCodec.createByCodecName(name)
+        else MediaCodec.createEncoderByType(MIME_AVC)
     }
 
     private fun selectVideoTrack(extractor: MediaExtractor): Int {

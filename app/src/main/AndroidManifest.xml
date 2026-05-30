@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Permissions needed for the Boomerang functionality -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -41,6 +42,32 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Android Photo Picker backport for API 26–29 (slice 07). On API 33+ the picker is native
+             and on 30–32 it's a system module; on 26–29 this <service> lets Google Play services
+             provide the proper picker UI. Without it the framework still resolves to an
+             ACTION_OPEN_DOCUMENT fallback, so it degrades gracefully. This is Google's documented
+             backport snippet (see the link below), copied verbatim.
+
+             EXPECTED IDE noise (working as intended): Android Studio's code inspector resolves the
+             android:name as a class reference and reports 4 "unresolved package" ERRORs
+             (android / gms / metadata / ModuleDependencies) because the GMS class is NOT on our
+             compile classpath — it's provided at RUNTIME by Google Play services. This is harmless:
+             the build, Lint, and runtime are all unaffected. tools:ignore="MissingClass" silences
+             only Lint's MissingClass check, not the IDE inspector (a separate engine), and there is
+             no clean per-line manifest suppression for it — so those red markers are accepted, not a
+             defect. Do NOT remove the <service> to clear them: it is what gives API 26–29 the picker.
+             See https://developer.android.com/training/data-storage/shared/photopicker -->
+        <service
+            android:name="com.google.android.gms.metadata.ModuleDependencies"
+            android:enabled="false"
+            android:exported="false"
+            tools:ignore="MissingClass">
+            <intent-filter>
+                <action android:name="com.google.android.gms.metadata.MODULE_DEPENDENCIES" />
+            </intent-filter>
+            <meta-data android:name="photopicker_activity:0:required" android:value="" />
+        </service>
     </application>
 
 </manifest>

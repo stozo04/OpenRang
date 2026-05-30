@@ -1,5 +1,6 @@
 package com.openrang.app.ui
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -8,6 +9,7 @@ import com.openrang.app.camera.CameraManager
 import com.openrang.app.data.RecordedVideo
 import com.openrang.app.data.ScratchCapture
 import com.openrang.app.data.UserPreferencesRepository
+import com.openrang.app.data.VideoImporter
 import com.openrang.app.data.VideoStorageRepository
 import com.openrang.app.media.BoomerangMode
 import com.openrang.app.media.VideoFilter
@@ -47,12 +49,26 @@ sealed interface BoomerangEvent {
     object Saved : BoomerangEvent
     /** Boomerang render failed. Snackbar invites a retry; the trim selection is preserved. */
     object Failed : BoomerangEvent
+
+    /**
+     * A picked library video was longer than the import limit (slice 07). Drives the friendly
+     * "That clip's a bit long" dialog; nothing was copied.
+     */
+    object ImportTooLong : BoomerangEvent
+
+    /**
+     * Importing a picked library video failed for a non-length reason — unreadable/revoked URI, an
+     * unreadable duration, or a copy I/O error (slice 07). Drives a "Couldn't import that video."
+     * snackbar; the user is returned to the gallery, never wedged.
+     */
+    object ImportFailed : BoomerangEvent
 }
 
 class OpenRangViewModel(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val videoStorage: VideoStorageRepository,
     private val videoProcessor: VideoProcessor,
+    private val videoImporter: VideoImporter,
 ) : ViewModel() {
 
     // Start in Initializing — DataStore read decides Onboarding vs CheckingPermissions
@@ -66,6 +82,19 @@ class OpenRangViewModel(
                 OpenRangUiState.CheckingPermissions
             } else {
                 OpenRangUiState.Onboarding
+            }
+        }
+        // Best-effort prune of orphaned scratch copies older than 24 h (parent D-8). Imports raise
+        // scratch churn (an abandoned import can leave a whole library-video-sized copy), so reclaim
+        // it deterministically at launch rather than waiting on Android's cache eviction. Fire-and-
+        // forget on Dispatchers.IO inside the repo — never blocks startup or the UI thread.
+        viewModelScope.launch {
+            try {
+                videoStorage.pruneStaleScratch(STALE_SCRATCH_MAX_AGE_MS)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("OpenRangViewModel", "Stale-scratch prune failed", e)
             }
         }
     }
@@ -161,6 +190,15 @@ class OpenRangViewModel(
     /** The raw the active scratch was promoted to (cached so a failed-render retry doesn't re-promote). */
     private var promotedRaw: RecordedVideo? = null
 
+    /**
+     * Whether the active editing session began as a library import ([onVideoPicked]) rather than a
+     * fresh camera capture (slice 07). The pipeline is otherwise reused byte-for-byte; this flag only
+     * changes where the user lands when the session ends — saving or discarding an imported clip
+     * returns to the [OpenRangUiState.Gallery] they imported from, not the camera. Reset in
+     * [clearEditorSession] and on every camera capture.
+     */
+    private var importedSession: Boolean = false
+
     fun startBurstCapture(cameraManager: CameraManager) {
         if (_uiState.value != OpenRangUiState.ReadyToCapture) return
 
@@ -172,6 +210,7 @@ class OpenRangViewModel(
         val scratch = videoStorage.createScratchCapture()
         activeScratch = scratch
         promotedRaw = null
+        importedSession = false // a fresh capture; this session ends back on the camera
         val outputFile = scratch.file
         if (outputFile.exists()) {
             outputFile.delete()
@@ -192,7 +231,7 @@ class OpenRangViewModel(
                             activeScratch = null
                             _uiState.value = OpenRangUiState.ReadyToCapture
                         } else {
-                            // Auto-route straight to the Trim screen (no LoopingPreview landing pad).
+                            // Auto-route straight to the Trim screen (no preview landing pad).
                             // The scratch stays in cache until the user saves (promote→raw) or discards.
                             // durationOf does a MediaMetadataRetriever decode and this callback runs on
                             // CameraX's main executor, so read it on a coroutine (Dispatchers.IO inside the
@@ -285,6 +324,77 @@ class OpenRangViewModel(
         _uiState.value = OpenRangUiState.ReadyToCapture
     }
 
+    // ── Import from library (slice 07) ──────────────────────────────────────────────────────────
+
+    /**
+     * Result of the Android Photo Picker (launched `VideoOnly` from the gallery). [uri] is the picked
+     * video, or `null` if the user backed out. On a valid pick we probe the duration *before* copying
+     * (so a >30 s clip is rejected with a friendly dialog without ever being copied), then copy the
+     * bytes into a fresh scratch file and enter the existing [OpenRangUiState.Trim] flow exactly as a
+     * fresh capture would — the imported clip is just "a scratch that came from the picker." Any I/O
+     * or unreadable-duration failure routes back to the gallery with a snackbar; never a crash.
+     */
+    fun onVideoPicked(uri: Uri?) {
+        if (uri == null) return // user backed out of the picker
+        _uiState.value = OpenRangUiState.ImportingVideo
+        viewModelScope.launch {
+            val durationMs = videoImporter.probeDurationMs(uri)
+            when {
+                // Unreadable duration → we can't enforce the ≤30 s rule, so don't import it.
+                durationMs <= 0L -> failImport()
+                // Enforce the dialog's advertised "up to 30 s" cap LENIENTLY: the small grace
+                // (IMPORT_DURATION_GRACE_MS) accepts a clip the user thinks is "30 s" but whose
+                // container duration reads 30.2–30.5 s. The grace only ever makes us *more* permissive
+                // than the promise, never stricter — so no user is surprised by a rejection, and a clip
+                // comfortably past 30 s is still rejected, exactly matching the "up to 30 seconds" copy.
+                durationMs > IMPORT_MAX_DURATION_MS + IMPORT_DURATION_GRACE_MS -> warnTooLong()
+                else -> {
+                    val scratch = videoStorage.createScratchCapture()
+                    if (!videoImporter.importToFile(uri, scratch.file)) {
+                        videoStorage.discardScratch(scratch)
+                        failImport()
+                        return@launch
+                    }
+                    val dur = videoStorage.durationOf(scratch.file)
+                    if (dur <= 0L) {
+                        videoStorage.discardScratch(scratch)
+                        failImport()
+                        return@launch
+                    }
+                    // Defensive: replacing activeScratch must not orphan a previous session's scratch
+                    // copy. In practice it's already null here — the import action lives only on the
+                    // gallery, and you can't reach the gallery mid-edit (save/discard both run
+                    // clearEditorSession) — but if one ever lingered we'd otherwise leak a whole
+                    // library-video-sized file until the 24h prune. discardScratch is a no-op on a
+                    // missing file, so this is safe even in the normal null case.
+                    activeScratch?.let { videoStorage.discardScratch(it) }
+                    activeScratch = scratch
+                    promotedRaw = null
+                    importedSession = true // saving/discarding returns to the gallery, not the camera
+                    _editorState.value = TrimState(
+                        sourceFile = scratch.file,
+                        sourceDurationMs = dur,
+                        trimStartMs = 0L,
+                        trimEndMs = dur, // whole clip ≤30 s; no trim-window cap needed
+                    )
+                    _uiState.value = OpenRangUiState.Trim(EditorSource.ScratchClip(scratch.uuid))
+                }
+            }
+        }
+    }
+
+    /** Non-length import failure: snackbar + back to the gallery (nothing left in flight). */
+    private suspend fun failImport() {
+        _events.send(BoomerangEvent.ImportFailed)
+        _uiState.value = OpenRangUiState.Gallery
+    }
+
+    /** Picked clip exceeded the import limit: friendly dialog + back to the gallery (nothing copied). */
+    private suspend fun warnTooLong() {
+        _events.send(BoomerangEvent.ImportTooLong)
+        _uiState.value = OpenRangUiState.Gallery
+    }
+
     /**
      * Finalize the current burst. Called from both the user-tap path and the 30 s auto-cap path.
      *
@@ -306,6 +416,7 @@ class OpenRangViewModel(
         _recordingElapsedMs.value = 0L
     }
 
+    /** Return to the live camera ([OpenRangUiState.ReadyToCapture]) — a generic "start over" reset. */
     fun resetToCapture() {
         _uiState.value = OpenRangUiState.ReadyToCapture
     }
@@ -324,11 +435,21 @@ class OpenRangViewModel(
         _editorState.value = current.copy(trimStartMs = start, trimEndMs = end)
     }
 
-    /** Discard the scratch clip and return to capture (the Trim back-arrow / confirm-discard path). */
+    /**
+     * Discard the scratch clip and leave the editor (the Trim back-arrow / confirm-discard path). A
+     * fresh capture returns to the camera; an imported clip returns to the [OpenRangUiState.Gallery]
+     * it was imported from (slice 07). The original library video is untouched — we only delete our
+     * own scratch copy.
+     */
     fun discardTrim() {
+        val returnToGallery = importedSession // capture before clearEditorSession() resets it
         activeScratch?.let { videoStorage.discardScratch(it) }
         clearEditorSession()
-        _uiState.value = OpenRangUiState.ReadyToCapture
+        if (returnToGallery) {
+            navigateToGallery()
+        } else {
+            _uiState.value = OpenRangUiState.ReadyToCapture
+        }
     }
 
     /**
@@ -412,7 +533,7 @@ class OpenRangViewModel(
         if (!tab.mode.needsReverse) return
         if (tab.reversedFile != null || tab.isReversedFileLoading) return
 
-        _editorTabState.value = tab.copy(isReversedFileLoading = true)
+        _editorTabState.value = tab.copy(isReversedFileLoading = true, reverseFailed = false)
         reverseJob = viewModelScope.launch {
             try {
                 val reversed = videoProcessor.ensureReversed(trim.sourceFile, trim.trimStartMs, trim.trimEndMs)
@@ -423,8 +544,14 @@ class OpenRangViewModel(
             } catch (e: CancellationException) {
                 throw e // never swallow cancellation (Lesson 013)
             } catch (e: Exception) {
+                // e.g. an imported clip whose codec the device can't tone-map/transcode. Flag the
+                // failure so the editor drops the "Loopifying…" shimmer and offers a retry instead of
+                // hanging forever (the shimmer is gated on reversedFile == null).
                 Log.e("OpenRangViewModel", "Reverse generation for preview failed", e)
-                _editorTabState.value = _editorTabState.value.copy(isReversedFileLoading = false)
+                _editorTabState.value = _editorTabState.value.copy(
+                    isReversedFileLoading = false,
+                    reverseFailed = true,
+                )
             }
         }
     }
@@ -470,6 +597,7 @@ class OpenRangViewModel(
                 videoStorage.registerBoomerang(output, raw.id)
                     ?: throw IOException("Failed to register boomerang ${output.name}")
 
+                val returnToGallery = importedSession // capture before clearEditorSession() resets it
                 videoStorage.discardScratch(scratch)
                 clearEditorSession()
                 loadRecordedVideos()
@@ -477,7 +605,13 @@ class OpenRangViewModel(
                 // clearEditorSession(), so it survives the session reset. The "Saved" snackbar is NOT
                 // emitted here — it's deferred until the share sheet returns (onShareSheetClosed).
                 _events.send(BoomerangEvent.Share(output))
-                _uiState.value = OpenRangUiState.ReadyToCapture
+                // A fresh capture lands back on the camera; an imported clip lands back on the gallery
+                // it was imported from (slice 07). The share sheet pops over whichever screen this is.
+                _uiState.value = if (returnToGallery) {
+                    OpenRangUiState.Gallery
+                } else {
+                    OpenRangUiState.ReadyToCapture
+                }
             } catch (e: CancellationException) {
                 throw e // never swallow cancellation (Lesson 013)
             } catch (e: IOException) {
@@ -519,6 +653,7 @@ class OpenRangViewModel(
         cancelReverseJob()
         activeScratch = null
         promotedRaw = null
+        importedSession = false
         _editorState.value = null
         _editorTabState.value = EditorTabState()
         _renderProgress.value = 0f
@@ -540,25 +675,40 @@ class OpenRangViewModel(
         /** Minimum trimmed duration; below this the NEXT action is disabled (slice 02). */
         const val MIN_TRIM_MS = 400L
 
-        /** Default boomerang config. Direction picker shipped slice 03, speed slider slice 04; reps (1) is
-         *  still hard-wired until slice 05. [DEFAULT_SPEED] is the slider's starting value. */
+        /** Default boomerang config. Direction picker shipped slice 03, speed slider slice 04, Looks
+         *  (filters) slice 05 — the Reps tab was dropped in favor of Looks, so [DEFAULT_REPS] stays
+         *  hard-wired at 1. [DEFAULT_SPEED] is the speed slider's starting value. */
         const val DEFAULT_SPEED = 2.0f
         const val DEFAULT_REPS = 1
 
         /** Playback-speed slider bounds (slice 04); [updateSpeed] clamps to this range. */
         const val MIN_SPEED = 0.25f
         const val MAX_SPEED = 3.0f
+
+        /** Max duration of an imported library clip (slice 07); same 30 s ceiling as a capture. */
+        const val IMPORT_MAX_DURATION_MS = MAX_RECORDING_MS
+
+        /**
+         * Grace added to [IMPORT_MAX_DURATION_MS] before rejecting an import, so a clip the user
+         * thinks of as "30 seconds" (often 30.2–30.5 s of actual container duration) isn't rejected
+         * for being a few hundred ms over (slice 07).
+         */
+        const val IMPORT_DURATION_GRACE_MS = 1_000L
+
+        /** Scratch files older than this are pruned at launch (parent D-8); 24 h. */
+        const val STALE_SCRATCH_MAX_AGE_MS = 24L * 60 * 60 * 1_000
     }
 
     class Factory(
         private val userPreferencesRepository: UserPreferencesRepository,
         private val videoStorage: VideoStorageRepository,
         private val videoProcessor: VideoProcessor,
+        private val videoImporter: VideoImporter,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(OpenRangViewModel::class.java)) {
-                return OpenRangViewModel(userPreferencesRepository, videoStorage, videoProcessor) as T
+                return OpenRangViewModel(userPreferencesRepository, videoStorage, videoProcessor, videoImporter) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
         }

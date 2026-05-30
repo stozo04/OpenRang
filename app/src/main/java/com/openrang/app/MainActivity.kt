@@ -11,8 +11,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
@@ -28,9 +30,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -41,7 +47,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,10 +61,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import com.openrang.app.camera.CameraManager
 import com.openrang.app.data.UserPreferencesRepositoryImpl
+import com.openrang.app.data.VideoImporterImpl
 import com.openrang.app.data.VideoStorageRepositoryImpl
 import com.openrang.app.data.dataStore
 import com.openrang.app.media.Media3VideoProcessor
@@ -67,10 +77,12 @@ import com.openrang.app.ui.BoomerangEvent
 import com.openrang.app.ui.CameraScreen
 import com.openrang.app.ui.CameraScreenHost
 import com.openrang.app.ui.GalleryScreen
+import com.openrang.app.ui.GlassWhite
+import com.openrang.app.ui.NeonCoral
+import com.openrang.app.ui.NeonPurple
 import com.openrang.app.ui.OnboardingScreen
 import com.openrang.app.ui.OpenRangUiState
 import com.openrang.app.ui.OpenRangViewModel
-import com.openrang.app.ui.PreviewScreen
 import com.openrang.app.ui.ProcessingScreen
 import com.openrang.app.ui.TrimScreen
 import java.io.File
@@ -87,6 +99,9 @@ class MainActivity : ComponentActivity() {
                 filesDir = applicationContext.filesDir,
             ),
             buildVideoProcessor(),
+            // ContentResolver lives in the Activity bridge (Lesson 004); the importer holds it, the
+            // ViewModel never sees a Context. applicationContext's resolver is process-lived and safe.
+            VideoImporterImpl(applicationContext.contentResolver),
         )
     }
     private lateinit var cameraManager: CameraManager
@@ -129,6 +144,21 @@ class MainActivity : ComponentActivity() {
         viewModel.onPermissionsChecked(cameraGranted && audioGranted)
     }
 
+    // Android Photo Picker (slice 07): single-select, VIDEO ONLY, no runtime storage permission.
+    // Returns a single Uri? — non-null on pick, null when the user backs out.
+    private val pickVideoLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        viewModel.onVideoPicked(uri)
+    }
+
+    /** Open the system photo picker filtered to videos (images are not selectable at the source). */
+    private fun importVideo() {
+        pickVideoLauncher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must run before super.onCreate(): hands the system splash to core-splashscreen,
         // which then swaps to postSplashScreenTheme (Theme.OpenRang) for the app window.
@@ -145,11 +175,16 @@ class MainActivity : ComponentActivity() {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val snackbarHostState = remember { SnackbarHostState() }
 
+                // Drives the friendly "That clip's a bit long" dialog (slice 07); flipped true when an
+                // ImportTooLong event arrives and false when the user dismisses it.
+                var showTooLongDialog by remember { mutableStateOf(false) }
+
                 // Hoisted out of the (non-composable) collect lambda below — stringResource can only
                 // be read in a composable scope.
                 val savedMessage = stringResource(R.string.snackbar_saved)
                 val viewAction = stringResource(R.string.snackbar_view_action)
                 val saveFailedMessage = stringResource(R.string.snackbar_save_failed)
+                val importFailedMessage = stringResource(R.string.snackbar_import_failed)
 
                 // Collect one-shot boomerang events → share sheet + snackbars (the app's only
                 // SnackbarHost). `when` stays exhaustive with no `else` (Lesson 014) so a new event
@@ -173,6 +208,14 @@ class MainActivity : ComponentActivity() {
                             BoomerangEvent.Failed -> snackbarHostState.showSnackbar(
                                 message = saveFailedMessage,
                             )
+                            // Import failed for a non-length reason (slice 07): a light snackbar; the
+                            // ViewModel has already returned the user to the gallery.
+                            BoomerangEvent.ImportFailed -> snackbarHostState.showSnackbar(
+                                message = importFailedMessage,
+                            )
+                            // Picked clip was too long (slice 07): a friendly dialog reads as guidance,
+                            // not an error. The ViewModel has already returned the user to the gallery.
+                            BoomerangEvent.ImportTooLong -> showTooLongDialog = true
                         }
                     }
                 }
@@ -192,6 +235,7 @@ class MainActivity : ComponentActivity() {
                         onCheckPermissions = ::checkPermissions,
                         onRationaleAcknowledged = ::onRationaleAcknowledged,
                         onOpenAppSettings = ::openAppSettings,
+                        onImportVideo = ::importVideo,
                     )
                     SnackbarHost(
                         hostState = snackbarHostState,
@@ -199,6 +243,11 @@ class MainActivity : ComponentActivity() {
                             .align(Alignment.BottomCenter)
                             .navigationBarsPadding(),
                     )
+
+                    // Friendly "too long" guidance over the gallery (slice 07).
+                    if (showTooLongDialog) {
+                        ImportTooLongDialog(onDismiss = { showTooLongDialog = false })
+                    }
                 }
             }
         }
@@ -314,6 +363,7 @@ fun OpenRangNavHost(
     onCheckPermissions: () -> Unit,
     onRationaleAcknowledged: () -> Unit,
     onOpenAppSettings: () -> Unit,
+    onImportVideo: () -> Unit,
 ) {
     // Auto-trigger permission check when state reaches CheckingPermissions (from either
     // Initializing→CheckingPermissions for returning users, or Onboarding→CheckingPermissions
@@ -378,21 +428,34 @@ fun OpenRangNavHost(
             BoomerangEditorScreen(viewModel = viewModel)
         }
         is OpenRangUiState.Processing -> {
+            // Swallow Back during the render. At target 36 predictive back is default-on and the
+            // platform's fallback for an unhandled back is "finish the Activity" — which here would
+            // tear down the in-flight Transformer encode, discarding the boomerang (and orphaning the
+            // already-promoted raw) with no prompt (Lesson 015). There is no partial render to salvage
+            // and no cancel-to-editor path wired, so the deliberate decision is to ignore Back for the
+            // few seconds the encode runs; it routes itself onward (success → camera/gallery, failure →
+            // editor) without user input.
+            BackHandler { /* intentionally ignored: render in flight, don't finish the Activity */ }
             // Render progress drives the spinner caption; read via a lambda so only the percentage
             // text recomposes as progress ticks (Lesson 016).
             val progress = viewModel.renderProgress.collectAsStateWithLifecycle()
             ProcessingScreen(progress = { progress.value })
         }
-        is OpenRangUiState.LoopingPreview -> {
-            PreviewScreen(
-                videoPath = uiState.videoPath,
-                onBackToCaptureClick = { viewModel.resetToCapture() }
-            )
+        // Probing + copying a picked library video (slice 07): a neutral loader, never the
+        // camera-bound screen (Lessons 012/014).
+        is OpenRangUiState.ImportingVideo -> {
+            // Same rationale as Processing: swallow Back so a predictive-back gesture can't finish the
+            // Activity mid-copy — that would cancel the viewModelScope copy and leave a partial scratch
+            // file behind (reclaimed later by the D-8 prune, but still a needless orphan). The import
+            // routes itself to Trim (success) or Gallery (too-long / failure) without user input.
+            BackHandler { /* intentionally ignored: import copy in flight, don't finish the Activity */ }
+            InfinityLoadingScreen()
         }
         is OpenRangUiState.Gallery -> {
             GalleryScreen(
                 viewModel = viewModel,
-                onBackClick = { viewModel.navigateBackFromGallery() }
+                onBackClick = { viewModel.navigateBackFromGallery() },
+                onImportVideo = onImportVideo,
             )
         }
     }
@@ -533,6 +596,82 @@ fun PermissionExplanationScreen(
                         color = Color.White
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Friendly "That clip's a bit long" dialog shown when an imported library video exceeds the 30 s
+ * limit (slice 07). Hand-rolled in the app's neon aesthetic (matching [PermissionExplanationScreen]
+ * and the gallery overlay) rather than a stock Material3 `AlertDialog`, so it reads as warm guidance,
+ * not a system error. Acknowledgment-only — the user is already back on the gallery and nothing was
+ * copied; the single "Got it" button just dismisses.
+ */
+@Composable
+fun ImportTooLongDialog(onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xCC1A1A1D))
+                .border(1.dp, GlassWhite, RoundedCornerShape(24.dp))
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(NeonPurple.copy(alpha = 0.12f))
+                    .border(2.dp, NeonPurple, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Timer,
+                    contentDescription = null,
+                    modifier = Modifier.size(30.dp),
+                    tint = NeonPurple
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = stringResource(R.string.import_too_long_title),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(R.string.import_too_long_body),
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center,
+                lineHeight = 22.sp
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.import_too_long_button),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
         }
     }

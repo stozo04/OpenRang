@@ -9,4 +9,15 @@
     <string name="snackbar_saved">Saved — view in gallery</string>
     <string name="snackbar_view_action">View</string>
     <string name="snackbar_save_failed">Couldn\'t save boomerang. Try again.</string>
+
+    <!-- Gallery -->
+    <string name="gallery_delete">Delete loop</string>
+
+    <!-- Import from library (slice 07) -->
+    <string name="gallery_import">Import a video</string>
+    <string name="gallery_import_empty_state">…or import one</string>
+    <string name="snackbar_import_failed">Couldn\'t import that video.</string>
+    <string name="import_too_long_title">That clip\'s a bit long</string>
+    <string name="import_too_long_body">OpenRang makes loops from videos up to 30 seconds. Pick a shorter clip and we\'ll loop it.</string>
+    <string name="import_too_long_button">Got it</string>
 </resources>

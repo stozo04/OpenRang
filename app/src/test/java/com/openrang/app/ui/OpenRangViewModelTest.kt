@@ -1,5 +1,6 @@
 package com.openrang.app.ui
 
+import android.net.Uri
 import android.util.Log
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoRecordEvent
@@ -7,6 +8,7 @@ import com.openrang.app.camera.CameraManager
 import com.openrang.app.data.RecordedVideo
 import com.openrang.app.data.ScratchCapture
 import com.openrang.app.data.UserPreferencesRepository
+import com.openrang.app.data.VideoImporter
 import com.openrang.app.data.VideoKind
 import com.openrang.app.data.VideoStorageRepository
 import com.openrang.app.media.BoomerangMode
@@ -96,6 +98,16 @@ class FakeVideoStorageRepository : VideoStorageRepository {
     /** UUIDs passed to [discardScratch], for assertions. */
     val discardedScratches = mutableListOf<String>()
 
+    /** Count of [createScratchCapture] calls, so import tests can assert "no scratch was minted". */
+    var createScratchCount: Int = 0
+        private set
+
+    /** Count of [pruneStaleScratch] calls + the last threshold, for the init-prune assertion (D-8). */
+    var pruneCallCount: Int = 0
+        private set
+    var lastPruneOlderThanMs: Long = -1L
+        private set
+
     /** Toggles to simulate failure paths. */
     var failPromote: Boolean = false
     var failRegister: Boolean = false
@@ -106,8 +118,15 @@ class FakeVideoStorageRepository : VideoStorageRepository {
     private var nextId = 1L
 
     override fun createScratchCapture(): ScratchCapture {
+        createScratchCount++
         val uuid = "uuid-${nextId++}"
         return ScratchCapture(uuid, File(tempRoot, "raw_$uuid.mp4"))
+    }
+
+    override suspend fun pruneStaleScratch(olderThanMs: Long): Int {
+        pruneCallCount++
+        lastPruneOlderThanMs = olderThanMs
+        return 0
     }
 
     override suspend fun promoteScratchToRaw(scratch: ScratchCapture): RecordedVideo? {
@@ -154,6 +173,7 @@ class FakeVideoStorageRepository : VideoStorageRepository {
  */
 class FakeVideoProcessor : VideoProcessor {
     var failRender: Boolean = false
+    var failReverse: Boolean = false
     var renderCount: Int = 0
 
     /** The speed passed to the most recent [renderBoomerang] call, for asserting save wiring (slice 04). */
@@ -197,7 +217,31 @@ class FakeVideoProcessor : VideoProcessor {
     ): File {
         ensureReversedCount++
         onProgress(1f)
+        if (failReverse) throw RuntimeException("simulated reverse failure")
         return reversedStub
+    }
+}
+
+/**
+ * Fake [VideoImporter] (slice 07). [probeMs] is what the pre-copy duration probe reports; [copyOk]
+ * decides whether [importToFile] "succeeds" (writing a few stub bytes to the dest) or fails. Tracks
+ * [importCallCount] so tests can assert a too-long clip is never copied.
+ */
+class FakeVideoImporter : VideoImporter {
+    var probeMs: Long = 3_000L
+    var copyOk: Boolean = true
+    var importCallCount: Int = 0
+        private set
+
+    override suspend fun probeDurationMs(source: Uri): Long = probeMs
+
+    override suspend fun importToFile(source: Uri, dest: File): Boolean {
+        importCallCount++
+        if (copyOk) {
+            dest.parentFile?.mkdirs()
+            dest.writeBytes(ByteArray(4))
+        }
+        return copyOk
     }
 }
 
@@ -211,7 +255,11 @@ class OpenRangViewModelTest {
     private lateinit var fakePreferencesRepository: FakeUserPreferencesRepository
     private lateinit var fakeVideoStorage: FakeVideoStorageRepository
     private lateinit var fakeVideoProcessor: FakeVideoProcessor
+    private lateinit var fakeVideoImporter: FakeVideoImporter
     private val cameraManager: CameraManager = mockk(relaxed = true)
+
+    /** A stand-in picked-video Uri; mockk avoids needing the android framework in a JVM test. */
+    private val fakeUri: Uri = mockk(relaxed = true)
 
     /**
      * Stand-in for a successfully-started recording. Since REC-2, a `null` return from
@@ -232,7 +280,8 @@ class OpenRangViewModelTest {
         fakePreferencesRepository = FakeUserPreferencesRepository(initialOnboardingCompleted = false)
         fakeVideoStorage = FakeVideoStorageRepository()
         fakeVideoProcessor = FakeVideoProcessor()
-        viewModel = OpenRangViewModel(fakePreferencesRepository, fakeVideoStorage, fakeVideoProcessor)
+        fakeVideoImporter = FakeVideoImporter()
+        viewModel = OpenRangViewModel(fakePreferencesRepository, fakeVideoStorage, fakeVideoProcessor, fakeVideoImporter)
     }
 
     @After
@@ -254,7 +303,7 @@ class OpenRangViewModelTest {
         // Create a ViewModel where onboarding was already completed
         val returningUserRepo = FakeUserPreferencesRepository(initialOnboardingCompleted = true)
         val returningViewModel =
-            OpenRangViewModel(returningUserRepo, FakeVideoStorageRepository(), FakeVideoProcessor())
+            OpenRangViewModel(returningUserRepo, FakeVideoStorageRepository(), FakeVideoProcessor(), FakeVideoImporter())
 
         assertEquals(OpenRangUiState.CheckingPermissions, returningViewModel.uiState.value)
     }
@@ -270,7 +319,7 @@ class OpenRangViewModelTest {
     fun `onOnboardingCompleted handles IOException gracefully`() {
         // Use the failing repository that throws IOException on write
         val failingViewModel =
-            OpenRangViewModel(FailingWritePreferencesRepository(), FakeVideoStorageRepository(), FakeVideoProcessor())
+            OpenRangViewModel(FailingWritePreferencesRepository(), FakeVideoStorageRepository(), FakeVideoProcessor(), FakeVideoImporter())
 
         // Should not crash — state should still transition to CheckingPermissions
         failingViewModel.onOnboardingCompleted()
@@ -607,6 +656,39 @@ class OpenRangViewModelTest {
         }
 
     @Test
+    fun `reverse generation failure flags reverseFailed and clears the loading shimmer`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            enterTrimState()
+            fakeVideoProcessor.failReverse = true
+
+            viewModel.onNextFromTrim() // default FORWARD_THEN_REVERSE → reverse generation runs + fails
+            advanceUntilIdle()
+
+            // The shimmer must clear and the failure must be flagged, so the editor shows a retry
+            // instead of "Loopifying…" forever (the HDR-import wedge).
+            assertTrue("reverseFailed must be set", viewModel.editorTabState.value.reverseFailed)
+            assertFalse(viewModel.editorTabState.value.isReversedFileLoading)
+            assertNull(viewModel.editorTabState.value.reversedFile)
+        }
+
+    @Test
+    fun `retrying reverse after a failure clears the flag and succeeds`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            enterTrimState()
+            fakeVideoProcessor.failReverse = true
+            viewModel.onNextFromTrim()
+            advanceUntilIdle()
+            assertTrue(viewModel.editorTabState.value.reverseFailed)
+
+            fakeVideoProcessor.failReverse = false
+            viewModel.ensureReversedSegment() // the editor's "Try again"
+            advanceUntilIdle()
+
+            assertFalse("retry clears the failure flag", viewModel.editorTabState.value.reverseFailed)
+            assertNotNull("retry produces the reversed clip", viewModel.editorTabState.value.reversedFile)
+        }
+
+    @Test
     fun `backToTrim returns to Trim preserving the trim selection`() =
         runTest(mainDispatcherRule.testDispatcher) {
             enterTrimState()
@@ -848,4 +930,188 @@ class OpenRangViewModelTest {
     fun `recordedVideos flow starts as empty list`() {
         assertTrue(viewModel.recordedVideos.value.isEmpty())
     }
+
+    // ── Import from library (slice 07) ──
+
+    /** Drive a successful import so the ViewModel lands on Trim with an imported editor session. */
+    private fun enterTrimViaImport(durationMs: Long = 3_000L) {
+        fakeVideoImporter.probeMs = durationMs
+        fakeVideoImporter.copyOk = true
+        fakeVideoStorage.fixedDurationMs = durationMs
+        viewModel.onVideoPicked(fakeUri) // runs eagerly under the unconfined main dispatcher
+    }
+
+    @Test
+    fun `init prunes stale scratch with the 24h threshold`() {
+        // The ViewModel constructed in setUp() prunes on init (D-8).
+        assertEquals(1, fakeVideoStorage.pruneCallCount)
+        assertEquals(OpenRangViewModel.STALE_SCRATCH_MAX_AGE_MS, fakeVideoStorage.lastPruneOlderThanMs)
+    }
+
+    @Test
+    fun `onVideoPicked null is a no-op (user backed out of the picker)`() {
+        viewModel.navigateToGallery()
+        viewModel.onVideoPicked(null)
+
+        assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+        assertNull(viewModel.editorState.value)
+        assertEquals(0, fakeVideoImporter.importCallCount)
+        assertEquals(0, fakeVideoStorage.createScratchCount)
+    }
+
+    @Test
+    fun `onVideoPicked with a short clip copies to scratch and routes to Trim`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            fakeVideoImporter.probeMs = 5_000L
+            fakeVideoStorage.fixedDurationMs = 5_000L
+
+            viewModel.onVideoPicked(fakeUri)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertTrue("expected Trim, was $state", state is OpenRangUiState.Trim)
+            assertTrue((state as OpenRangUiState.Trim).source is EditorSource.ScratchClip)
+
+            val editor = viewModel.editorState.value
+            assertNotNull(editor)
+            assertEquals(0L, editor!!.trimStartMs)
+            assertEquals(5_000L, editor.trimEndMs) // whole clip; no window cap
+            assertEquals(5_000L, editor.sourceDurationMs)
+            assertEquals(1, fakeVideoImporter.importCallCount)
+        }
+
+    @Test
+    fun `onVideoPicked just within the grace window is accepted`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            // 30.5 s ≤ 30 s + 1 s grace → accepted, not rejected.
+            fakeVideoImporter.probeMs = 30_500L
+            fakeVideoStorage.fixedDurationMs = 30_500L
+
+            viewModel.onVideoPicked(fakeUri)
+            advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value is OpenRangUiState.Trim)
+            assertEquals(1, fakeVideoImporter.importCallCount)
+        }
+
+    @Test
+    fun `onVideoPicked over the limit warns and copies nothing`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            fakeVideoImporter.probeMs = 32_000L // > 30 s + 1 s grace
+            val events = mutableListOf<BoomerangEvent>()
+            val job = backgroundScope.launch { viewModel.events.toList(events) }
+
+            viewModel.onVideoPicked(fakeUri)
+            advanceUntilIdle()
+
+            assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+            assertTrue(events.contains(BoomerangEvent.ImportTooLong))
+            // Caught before any copy or scratch mint.
+            assertEquals(0, fakeVideoImporter.importCallCount)
+            assertEquals(0, fakeVideoStorage.createScratchCount)
+            assertNull(viewModel.editorState.value)
+            job.cancel()
+        }
+
+    @Test
+    fun `onVideoPicked with unreadable duration fails to import without copying`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            fakeVideoImporter.probeMs = 0L
+            val events = mutableListOf<BoomerangEvent>()
+            val job = backgroundScope.launch { viewModel.events.toList(events) }
+
+            viewModel.onVideoPicked(fakeUri)
+            advanceUntilIdle()
+
+            assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+            assertTrue(events.contains(BoomerangEvent.ImportFailed))
+            assertEquals(0, fakeVideoImporter.importCallCount)
+            assertNull(viewModel.editorState.value)
+            job.cancel()
+        }
+
+    @Test
+    fun `onVideoPicked when the copy fails reports failure and discards the scratch`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            fakeVideoImporter.probeMs = 4_000L
+            fakeVideoImporter.copyOk = false
+            val events = mutableListOf<BoomerangEvent>()
+            val job = backgroundScope.launch { viewModel.events.toList(events) }
+
+            viewModel.onVideoPicked(fakeUri)
+            advanceUntilIdle()
+
+            assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+            assertTrue(events.contains(BoomerangEvent.ImportFailed))
+            assertEquals(1, fakeVideoStorage.discardedScratches.size) // no orphan scratch
+            assertNull(viewModel.editorState.value)
+            job.cancel()
+        }
+
+    @Test
+    fun `onVideoPicked with an unreadable post-copy duration discards the scratch and fails`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            fakeVideoImporter.probeMs = 4_000L     // passes the pre-copy probe…
+            fakeVideoStorage.fixedDurationMs = 0L  // …but durationOf on the copy reads 0
+            val events = mutableListOf<BoomerangEvent>()
+            val job = backgroundScope.launch { viewModel.events.toList(events) }
+
+            viewModel.onVideoPicked(fakeUri)
+            advanceUntilIdle()
+
+            assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+            assertTrue(events.contains(BoomerangEvent.ImportFailed))
+            assertEquals(1, fakeVideoStorage.discardedScratches.size)
+            assertNull(viewModel.editorState.value)
+            job.cancel()
+        }
+
+    @Test
+    fun `discarding an imported clip returns to the gallery`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            enterTrimViaImport()
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value is OpenRangUiState.Trim)
+
+            viewModel.discardTrim()
+            advanceUntilIdle()
+
+            // Imported sessions return to the gallery they came from, not the camera (slice 07).
+            assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+            assertEquals(1, fakeVideoStorage.discardedScratches.size)
+            assertNull(viewModel.editorState.value)
+        }
+
+    @Test
+    fun `saving an imported boomerang returns to the gallery and still emits Share`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            enterTrimViaImport()
+            advanceUntilIdle()
+            viewModel.onNextFromTrim()
+            advanceUntilIdle()
+            val events = mutableListOf<BoomerangEvent>()
+            val job = backgroundScope.launch { viewModel.events.toList(events) }
+
+            viewModel.saveBoomerang()
+            advanceUntilIdle()
+
+            assertEquals(OpenRangUiState.Gallery, viewModel.uiState.value)
+            assertEquals(1, fakeVideoProcessor.renderCount)
+            assertTrue("share sheet still pops for an import", events.any { it is BoomerangEvent.Share })
+            job.cancel()
+        }
+
+    @Test
+    fun `a fresh capture still returns to the camera on save (not the gallery)`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            // Guard the import flag doesn't leak into the capture path.
+            enterTrimState()
+            viewModel.onNextFromTrim()
+            advanceUntilIdle()
+
+            viewModel.saveBoomerang()
+            advanceUntilIdle()
+
+            assertEquals(OpenRangUiState.ReadyToCapture, viewModel.uiState.value)
+        }
 }

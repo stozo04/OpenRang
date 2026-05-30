@@ -1,7 +1,6 @@
 {
-  "version": "0.2",
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
   "language": "en",
-  "$comment": "Tier-3 static analysis (Issue #21) — approximate Android Studio's proofreading/typo inspection headlessly. Run scoped to a PR's changed markdown: npx --yes cspell --no-progress $(git diff --name-only --diff-filter=d main...HEAD -- '*.md'). 'words' is the project dictionary of domain/tool proper-nouns that are not typos; grow it deliberately rather than disabling the check. See docs/STATIC_ANALYSIS.md.",
   "useGitignore": true,
   "ignorePaths": [
     "**/node_modules/**",
