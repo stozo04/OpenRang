@@ -16,5 +16,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "OpenRang"
+rootProject.name = "OpenLoop"
 include(":app")

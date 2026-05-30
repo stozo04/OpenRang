@@ -1,6 +1,6 @@
 # Android 16 Doc-Prep — Get the docs ready for the `targetSdk 36` upgrade
 
-**GitHub Issue:** none of its own — this is **preparation for [Issue #7](https://github.com/stozo04/OpenRang/issues/7)** (the actual SDK upgrade). Unnumbered folder on purpose: the `NNN-` prefix maps a folder to a GitHub issue number, and this work has no separate issue.
+**GitHub Issue:** none of its own — this is **preparation for [Issue #7](https://github.com/stozo04/OpenLoop/issues/7)** (the actual SDK upgrade). Unnumbered folder on purpose: the `NNN-` prefix maps a folder to a GitHub issue number, and this work has no separate issue.
 **Branch:** `feature/update-api` (merged in PR #13)
 **Status:** SHIPPED — archived here. Originally `docs/active/android-16-doc-prep/IMPLEMENTATION.md`; combined into the `007-target-sdk-upgrade/` folder alongside the implementation record when Issue #7 shipped (PR #15).
 **Last updated:** 2026-05-28

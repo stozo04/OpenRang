@@ -1,0 +1,716 @@
+package io.github.stozo04.openloop.ui
+
+import android.net.Uri
+import android.util.Log
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import io.github.stozo04.openloop.camera.CameraManager
+import io.github.stozo04.openloop.data.RecordedVideo
+import io.github.stozo04.openloop.data.ScratchCapture
+import io.github.stozo04.openloop.data.UserPreferencesRepository
+import io.github.stozo04.openloop.data.VideoImporter
+import io.github.stozo04.openloop.data.VideoStorageRepository
+import io.github.stozo04.openloop.media.BoomerangMode
+import io.github.stozo04.openloop.media.VideoFilter
+import io.github.stozo04.openloop.media.VideoProcessor
+import io.github.stozo04.openloop.media.needsReverse
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
+import java.io.File
+import java.io.IOException
+import androidx.camera.video.VideoRecordEvent
+
+/**
+ * One-shot events the [OpenLoopViewModel] emits for transient UI (snackbars). Delivered over a
+ * [Channel] (not a StateFlow) so they fire exactly once and never replay on recomposition.
+ */
+sealed interface BoomerangEvent {
+    /**
+     * Boomerang rendered + saved; carries the rendered [file] (a `filesDir/boomerangs/` MP4) so the
+     * UI can hand it to the Android share sheet (slice 06). The "Saved — view in gallery" snackbar is
+     * deferred until the share sheet is dismissed (see [BoomerangEvent.Saved] / [onShareSheetClosed]).
+     */
+    data class Share(val file: File) : BoomerangEvent
+    /**
+     * Show the "Saved — view in gallery" snackbar (with a "View" action into the gallery). Emitted
+     * *after* the share sheet returns control — see [onShareSheetClosed] — so the snackbar isn't wasted
+     * behind the chooser.
+     */
+    object Saved : BoomerangEvent
+    /** Boomerang render failed. Snackbar invites a retry; the trim selection is preserved. */
+    object Failed : BoomerangEvent
+
+    /**
+     * A picked library video was longer than the import limit (slice 07). Drives the friendly
+     * "That clip's a bit long" dialog; nothing was copied.
+     */
+    object ImportTooLong : BoomerangEvent
+
+    /**
+     * Importing a picked library video failed for a non-length reason — unreadable/revoked URI, an
+     * unreadable duration, or a copy I/O error (slice 07). Drives a "Couldn't import that video."
+     * snackbar; the user is returned to the gallery, never wedged.
+     */
+    object ImportFailed : BoomerangEvent
+}
+
+class OpenLoopViewModel(
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val videoStorage: VideoStorageRepository,
+    private val videoProcessor: VideoProcessor,
+    private val videoImporter: VideoImporter,
+) : ViewModel() {
+
+    // Start in Initializing — DataStore read decides Onboarding vs CheckingPermissions
+    private val _uiState = MutableStateFlow<OpenLoopUiState>(OpenLoopUiState.Initializing)
+    val uiState: StateFlow<OpenLoopUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val onboardingDone = userPreferencesRepository.hasCompletedOnboarding.first()
+            _uiState.value = if (onboardingDone) {
+                OpenLoopUiState.CheckingPermissions
+            } else {
+                OpenLoopUiState.Onboarding
+            }
+        }
+        // Best-effort prune of orphaned scratch copies older than 24 h (parent D-8). Imports raise
+        // scratch churn (an abandoned import can leave a whole library-video-sized copy), so reclaim
+        // it deterministically at launch rather than waiting on Android's cache eviction. Fire-and-
+        // forget on Dispatchers.IO inside the repo — never blocks startup or the UI thread.
+        viewModelScope.launch {
+            try {
+                videoStorage.pruneStaleScratch(STALE_SCRATCH_MAX_AGE_MS)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("OpenLoopViewModel", "Stale-scratch prune failed", e)
+            }
+        }
+    }
+
+    fun onOnboardingCompleted() {
+        _uiState.value = OpenLoopUiState.CheckingPermissions
+        viewModelScope.launch {
+            try {
+                userPreferencesRepository.setOnboardingCompleted(true)
+            } catch (e: IOException) {
+                Log.e("OpenLoopViewModel", "Failed to persist onboarding state", e)
+                // Non-fatal: user will just see onboarding again next launch
+            }
+        }
+    }
+
+    fun onPermissionsChecked(granted: Boolean) {
+        _uiState.value = if (granted) {
+            OpenLoopUiState.ReadyToCapture
+        } else {
+            OpenLoopUiState.PermissionDenied
+        }
+    }
+
+    /** User denied a required permission once; show the educational rationale screen. */
+    fun showPermissionRationale() {
+        _uiState.value = OpenLoopUiState.PermissionRationale
+    }
+
+    /**
+     * User acknowledged the rationale. Return to [OpenLoopUiState.CheckingPermissions] so the
+     * permission flow has a single source of truth; MainActivity then launches the system dialog
+     * directly to avoid re-entering the rationale branch (see MainActivity.checkPermissions).
+     */
+    fun onRationaleAcknowledged() {
+        _uiState.value = OpenLoopUiState.CheckingPermissions
+    }
+
+    /**
+     * User dismissed the rationale ("Not now") instead of granting. Move to the blocked-but-
+     * recoverable [OpenLoopUiState.PermissionDenied] screen rather than nagging — the user can
+     * still retry or open Settings from there. Satisfies Google's "always provide the option to
+     * cancel an educational UI flow" guidance.
+     */
+    fun onRationaleDeclined() {
+        _uiState.value = OpenLoopUiState.PermissionDenied
+    }
+
+    private var recordingJob: Job? = null
+
+    /**
+     * Elapsed recording time in milliseconds, driven by the capture timer while in
+     * [OpenLoopUiState.Recording]. The UI reads this to draw the shutter progress ring and the
+     * `00:00 / 00:30` countdown chip. It re-emits roughly every [TICK_MS] ms and is reset to 0
+     * whenever a capture stops. Value is clamped to [MAX_RECORDING_MS].
+     */
+    private val _recordingElapsedMs = MutableStateFlow(0L)
+    val recordingElapsedMs: StateFlow<Long> = _recordingElapsedMs.asStateFlow()
+
+    private val _recordedVideos = MutableStateFlow<List<RecordedVideo>>(emptyList())
+    val recordedVideos: StateFlow<List<RecordedVideo>> = _recordedVideos.asStateFlow()
+
+    /**
+     * The Trim screen's working state (source file, duration, handle positions), or `null` when no
+     * clip is being edited. Held alongside (not inside) [OpenLoopUiState.Trim] so the routed state
+     * stays a slim discriminator and the trim selection survives a failed render.
+     */
+    private val _editorState = MutableStateFlow<TrimState?>(null)
+    val editorState: StateFlow<TrimState?> = _editorState.asStateFlow()
+
+    /**
+     * The boomerang editor's tab selections (slice 03: direction only). Held alongside [editorState]
+     * so [OpenLoopUiState.BoomerangEditor] stays a slim discriminator. Reset to defaults each time the
+     * editor opens (see [onNextFromTrim]).
+     */
+    private val _editorTabState = MutableStateFlow(EditorTabState())
+    val editorTabState: StateFlow<EditorTabState> = _editorTabState.asStateFlow()
+
+    /** In-flight reverse-generation for the preview; canceled when the editing session ends. */
+    private var reverseJob: Job? = null
+
+    /** Render progress (0f..1f) for the [OpenLoopUiState.Processing] spinner. */
+    private val _renderProgress = MutableStateFlow(0f)
+    val renderProgress: StateFlow<Float> = _renderProgress.asStateFlow()
+
+    /** One-shot snackbar events (see [BoomerangEvent]); collected once by MainActivity. */
+    private val _events = Channel<BoomerangEvent>(Channel.BUFFERED)
+    val events: Flow<BoomerangEvent> = _events.receiveAsFlow()
+
+    /** The in-flight capture's scratch file; non-null between capture start and Trim discard/save. */
+    private var activeScratch: ScratchCapture? = null
+
+    /** The raw the active scratch was promoted to (cached so a failed-render retry doesn't re-promote). */
+    private var promotedRaw: RecordedVideo? = null
+
+    /**
+     * Whether the active editing session began as a library import ([onVideoPicked]) rather than a
+     * fresh camera capture (slice 07). The pipeline is otherwise reused byte-for-byte; this flag only
+     * changes where the user lands when the session ends — saving or discarding an imported clip
+     * returns to the [OpenLoopUiState.Gallery] they imported from, not the camera. Reset in
+     * [clearEditorSession] and on every camera capture.
+     */
+    private var importedSession: Boolean = false
+
+    fun startBurstCapture(cameraManager: CameraManager) {
+        if (_uiState.value != OpenLoopUiState.ReadyToCapture) return
+
+        _uiState.value = OpenLoopUiState.Recording
+
+        // Per-capture scratch file (cacheDir/scratch/raw_<uuid>.mp4) instead of a single fixed path,
+        // so the captured clip has a stable identity for the Trim screen and back-to-back captures
+        // can't clobber each other.
+        val scratch = videoStorage.createScratchCapture()
+        activeScratch = scratch
+        promotedRaw = null
+        importedSession = false // a fresh capture; this session ends back on the camera
+        val outputFile = scratch.file
+        if (outputFile.exists()) {
+            outputFile.delete()
+        }
+
+        try {
+            val recording = cameraManager.startRecording(outputFile) { event ->
+                when (event) {
+                    is VideoRecordEvent.Start -> {
+                        Log.d("OpenLoopViewModel", "Video burst recording started.")
+                    }
+                    is VideoRecordEvent.Finalize -> {
+                        // Whichever path finalized us (user tap or 30 s auto-cap), the timer is done.
+                        clearRecordingTimers()
+                        if (event.hasError()) {
+                            Log.e("OpenLoopViewModel", "Video burst recording failed: ${event.error}")
+                            videoStorage.discardScratch(scratch)
+                            activeScratch = null
+                            _uiState.value = OpenLoopUiState.ReadyToCapture
+                        } else {
+                            // Auto-route straight to the Trim screen (no preview landing pad).
+                            // The scratch stays in cache until the user saves (promote→raw) or discards.
+                            // durationOf does a MediaMetadataRetriever decode and this callback runs on
+                            // CameraX's main executor, so read it on a coroutine (Dispatchers.IO inside the
+                            // repo) before routing — never block the main thread (ANDROID_STANDARDS §9).
+                            viewModelScope.launch {
+                                val durationMs = videoStorage.durationOf(outputFile)
+                                Log.d("OpenLoopViewModel", "Capture finalized (${durationMs}ms): ${outputFile.absolutePath}")
+                                _editorState.value = TrimState(
+                                    sourceFile = outputFile,
+                                    sourceDurationMs = durationMs,
+                                    trimStartMs = 0L,
+                                    trimEndMs = durationMs,
+                                )
+                                _uiState.value = OpenLoopUiState.Trim(EditorSource.ScratchClip(scratch.uuid))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // startRecording returns null when the VideoCapture use case isn't bound yet (REC-2).
+            // If we launched the timer anyway, no Finalize would ever fire, the auto-cap's
+            // stopRecording() would be a no-op, and the UI would sit stuck in Recording with a full
+            // ring for 30 s. Revert to ReadyToCapture and bail BEFORE starting the timer coroutine.
+            if (recording == null) {
+                Log.e("OpenLoopViewModel", "startRecording returned null (camera not bound); aborting capture")
+                clearRecordingTimers()
+                _uiState.value = OpenLoopUiState.ReadyToCapture
+                return
+            }
+
+            // Drive the elapsed-time flow (for the progress ring + countdown chip) and enforce the
+            // 30 s hard cap. When elapsed reaches MAX_RECORDING_MS with no user tap, finalize via the
+            // same stopBurstCapture() path as a tap. The loop is bounded by the cap, so a virtual-time
+            // test can advanceUntilIdle() without spinning forever (Lesson 008).
+            _recordingElapsedMs.value = 0L
+            recordingJob = viewModelScope.launch {
+                var elapsed = 0L
+                while (elapsed < MAX_RECORDING_MS) {
+                    delay(TICK_MS)
+                    elapsed = (elapsed + TICK_MS).coerceAtMost(MAX_RECORDING_MS)
+                    _recordingElapsedMs.value = elapsed
+                }
+                stopBurstCapture(cameraManager)
+            }
+        } catch (e: IllegalStateException) {
+            // prepareRecording/start: the Recorder already has an unfinished active recording
+            // (PendingRecording.start docs). Also, the path withAudioEnabled() takes when the
+            // Recorder doesn't support audio. Recover to idle rather than wedging in Recording.
+            recoverFromFailedStart(e)
+        } catch (e: SecurityException) {
+            // withAudioEnabled() throws this if RECORD_AUDIO was revoked between our permission
+            // check and start() (PendingRecording.withAudioEnabled docs). Recover to idle.
+            recoverFromFailedStart(e)
+        }
+        // NOTE: deliberately NOT catching Exception broadly (REC-3 / ANDROID_STANDARDS §3). The
+        // synchronous start path only declares IllegalStateException + SecurityException; CameraX
+        // surfaces IO/encoder failures asynchronously via VideoRecordEvent.Finalize (handled above),
+        // not as a throw. Letting any other throwable propagate keeps real programming errors visible.
+    }
+
+    /** Shared recovery for a synchronous start-recording failure: log, cancel timers, go idle. */
+    private fun recoverFromFailedStart(e: Exception) {
+        Log.e("OpenLoopViewModel", "Failed to start burst capture", e)
+        clearRecordingTimers()
+        _uiState.value = OpenLoopUiState.ReadyToCapture
+    }
+
+    fun loadRecordedVideos() {
+        // Directory scan + lazy thumbnail decode runs on Dispatchers.IO inside the repo; launch so
+        // the read never blocks the caller's (main) thread (ANDROID_STANDARDS §9).
+        viewModelScope.launch {
+            _recordedVideos.value = videoStorage.loadRecordedVideos()
+        }
+    }
+
+    fun deleteVideo(video: RecordedVideo) {
+        viewModelScope.launch {
+            videoStorage.deleteVideo(video)
+            _recordedVideos.value = videoStorage.loadRecordedVideos()
+        }
+    }
+
+    fun navigateToGallery() {
+        _uiState.value = OpenLoopUiState.Gallery
+        loadRecordedVideos()
+    }
+
+    fun navigateBackFromGallery() {
+        _uiState.value = OpenLoopUiState.ReadyToCapture
+    }
+
+    // ── Import from library (slice 07) ──────────────────────────────────────────────────────────
+
+    /**
+     * Result of the Android Photo Picker (launched `VideoOnly` from the gallery). [uri] is the picked
+     * video, or `null` if the user backed out. On a valid pick we probe the duration *before* copying
+     * (so a >30 s clip is rejected with a friendly dialog without ever being copied), then copy the
+     * bytes into a fresh scratch file and enter the existing [OpenLoopUiState.Trim] flow exactly as a
+     * fresh capture would — the imported clip is just "a scratch that came from the picker." Any I/O
+     * or unreadable-duration failure routes back to the gallery with a snackbar; never a crash.
+     */
+    fun onVideoPicked(uri: Uri?) {
+        if (uri == null) return // user backed out of the picker
+        _uiState.value = OpenLoopUiState.ImportingVideo
+        viewModelScope.launch {
+            val durationMs = videoImporter.probeDurationMs(uri)
+            when {
+                // Unreadable duration → we can't enforce the ≤30 s rule, so don't import it.
+                durationMs <= 0L -> failImport()
+                // Enforce the dialog's advertised "up to 30 s" cap LENIENTLY: the small grace
+                // (IMPORT_DURATION_GRACE_MS) accepts a clip the user thinks is "30 s" but whose
+                // container duration reads 30.2–30.5 s. The grace only ever makes us *more* permissive
+                // than the promise, never stricter — so no user is surprised by a rejection, and a clip
+                // comfortably past 30 s is still rejected, exactly matching the "up to 30 seconds" copy.
+                durationMs > IMPORT_MAX_DURATION_MS + IMPORT_DURATION_GRACE_MS -> warnTooLong()
+                else -> {
+                    val scratch = videoStorage.createScratchCapture()
+                    if (!videoImporter.importToFile(uri, scratch.file)) {
+                        videoStorage.discardScratch(scratch)
+                        failImport()
+                        return@launch
+                    }
+                    val dur = videoStorage.durationOf(scratch.file)
+                    if (dur <= 0L) {
+                        videoStorage.discardScratch(scratch)
+                        failImport()
+                        return@launch
+                    }
+                    // Defensive: replacing activeScratch must not orphan a previous session's scratch
+                    // copy. In practice it's already null here — the import action lives only on the
+                    // gallery, and you can't reach the gallery mid-edit (save/discard both run
+                    // clearEditorSession) — but if one ever lingered we'd otherwise leak a whole
+                    // library-video-sized file until the 24h prune. discardScratch is a no-op on a
+                    // missing file, so this is safe even in the normal null case.
+                    activeScratch?.let { videoStorage.discardScratch(it) }
+                    activeScratch = scratch
+                    promotedRaw = null
+                    importedSession = true // saving/discarding returns to the gallery, not the camera
+                    _editorState.value = TrimState(
+                        sourceFile = scratch.file,
+                        sourceDurationMs = dur,
+                        trimStartMs = 0L,
+                        trimEndMs = dur, // whole clip ≤30 s; no trim-window cap needed
+                    )
+                    _uiState.value = OpenLoopUiState.Trim(EditorSource.ScratchClip(scratch.uuid))
+                }
+            }
+        }
+    }
+
+    /** Non-length import failure: snackbar + back to the gallery (nothing left in flight). */
+    private suspend fun failImport() {
+        _events.send(BoomerangEvent.ImportFailed)
+        _uiState.value = OpenLoopUiState.Gallery
+    }
+
+    /** Picked clip exceeded the import limit: friendly dialog + back to the gallery (nothing copied). */
+    private suspend fun warnTooLong() {
+        _events.send(BoomerangEvent.ImportTooLong)
+        _uiState.value = OpenLoopUiState.Gallery
+    }
+
+    /**
+     * Finalize the current burst. Called from both the user-tap path and the 30 s auto-cap path.
+     *
+     * Idempotent by design: [recordingJob] is non-null only between [startBurstCapture] and the
+     * `Finalize` callback. The first call cancels the timer and stops the recording; any later call
+     * (e.g. a user tap landing on the same scheduler tick as the auto-cap) finds a null job and
+     * returns, so `cameraManager.stopRecording()` is invoked exactly once per capture.
+     */
+    fun stopBurstCapture(cameraManager: CameraManager) {
+        if (recordingJob == null) return
+        clearRecordingTimers()
+        cameraManager.stopRecording()
+    }
+
+    /** Cancel the elapsed-time / auto-cap timer and reset the progress ring to empty. */
+    private fun clearRecordingTimers() {
+        recordingJob?.cancel()
+        recordingJob = null
+        _recordingElapsedMs.value = 0L
+    }
+
+    /** Return to the live camera ([OpenLoopUiState.ReadyToCapture]) — a generic "start over" reset. */
+    fun resetToCapture() {
+        _uiState.value = OpenLoopUiState.ReadyToCapture
+    }
+
+    // ── Trim screen (slice 02) ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Update the trim handles. Positions are clamped to `[0, sourceDuration]`; an update that would
+     * shrink the window below [MIN_TRIM_MS] is ignored (the handles can't cross within the minimum).
+     */
+    fun updateTrim(startMs: Long, endMs: Long) {
+        val current = _editorState.value ?: return
+        val start = startMs.coerceIn(0L, current.sourceDurationMs)
+        val end = endMs.coerceIn(0L, current.sourceDurationMs)
+        if (end - start < MIN_TRIM_MS) return
+        _editorState.value = current.copy(trimStartMs = start, trimEndMs = end)
+    }
+
+    /**
+     * Discard the scratch clip and leave the editor (the Trim back-arrow / confirm-discard path). A
+     * fresh capture returns to the camera; an imported clip returns to the [OpenLoopUiState.Gallery]
+     * it was imported from (slice 07). The original library video is untouched — we only delete our
+     * own scratch copy.
+     */
+    fun discardTrim() {
+        val returnToGallery = importedSession // capture before clearEditorSession() resets it
+        activeScratch?.let { videoStorage.discardScratch(it) }
+        clearEditorSession()
+        if (returnToGallery) {
+            navigateToGallery()
+        } else {
+            _uiState.value = OpenLoopUiState.ReadyToCapture
+        }
+    }
+
+    /**
+     * NEXT on the Trim screen: open the tabbed boomerang editor over the current trim (slice 03).
+     * Resets the editor tabs to defaults (`FORWARD_THEN_REVERSE`), routes to
+     * [OpenLoopUiState.BoomerangEditor], and eagerly kicks off reverse generation so the default
+     * direction's preview is ready ASAP. The actual save now happens from the editor's checkmark
+     * ([saveBoomerang]); slice 02's default-render-on-NEXT is gone.
+     */
+    fun onNextFromTrim() {
+        val scratch = activeScratch ?: return
+        if (_editorState.value == null) return
+        _editorTabState.value = EditorTabState()
+        _uiState.value = OpenLoopUiState.BoomerangEditor(EditorSource.ScratchClip(scratch.uuid))
+        ensureReversedSegment()
+    }
+
+    /** Back arrow / back gesture from the editor: return to Trim, preserving the trim selection. */
+    fun backToTrim() {
+        val scratch = activeScratch ?: run {
+            _uiState.value = OpenLoopUiState.ReadyToCapture
+            return
+        }
+        cancelReverseJob()
+        _uiState.value = OpenLoopUiState.Trim(EditorSource.ScratchClip(scratch.uuid))
+    }
+
+    /**
+     * Select a boomerang direction in the editor's Direction tab. Updating to a reverse-containing
+     * mode kicks off [ensureReversedSegment] (idempotent — a no-op if the reversed file is already
+     * ready or in flight); `FORWARD` needs no reversed clip.
+     */
+    fun updateMode(mode: BoomerangMode) {
+        val current = _editorTabState.value
+        if (current.mode == mode) return
+        _editorTabState.value = current.copy(mode = mode)
+        if (mode.needsReverse) ensureReversedSegment()
+    }
+
+    /**
+     * Set the playback speed from the editor's Speed tab (slice 04). Clamped to [MIN_SPEED]..[MAX_SPEED]
+     * so neither the player nor the renderer ever sees an out-of-range value, regardless of what the
+     * slider emits. Speed is a player-side effect on the preview and a per-clip render effect at save —
+     * it never touches the cached [EditorTabState.reversedFile], so no reverse regeneration is needed.
+     */
+    fun updateSpeed(speed: Float) {
+        val clamped = speed.coerceIn(MIN_SPEED, MAX_SPEED)
+        val current = _editorTabState.value
+        if (current.speed == clamped) return
+        _editorTabState.value = current.copy(speed = clamped)
+    }
+
+    /**
+     * Set the color look from the editor's Looks tab (slice 05). Like [updateSpeed] it's a pure
+     * effect selection — applied live in the preview via `setVideoEffects` and baked into the render;
+     * it never touches the cached [EditorTabState.reversedFile] or the output duration.
+     */
+    fun updateFilter(filter: VideoFilter) {
+        val current = _editorTabState.value
+        if (current.filter == filter) return
+        _editorTabState.value = current.copy(filter = filter)
+    }
+
+    /** Switch the editor's active tab (Direction / Speed / Looks); pure UI state, no side effects. */
+    fun switchTab(tab: EditorTab) {
+        val current = _editorTabState.value
+        if (current.activeTab == tab) return
+        _editorTabState.value = current.copy(activeTab = tab)
+    }
+
+    /**
+     * Ensure the reversed clip for the current trim exists (for the preview, and reused by the render).
+     * Serialized against fast chip-taps: once the reversed file is ready or a generation is already in
+     * flight, further calls are ignored (KICKOFF §4 — the trim is fixed for the session, so one run
+     * per session suffices). Failure clears the loading flag and leaves [EditorTabState.reversedFile]
+     * null; the preview then falls back to forward playback and the user can retry by reelecting.
+     */
+    fun ensureReversedSegment() {
+        val trim = _editorState.value ?: return
+        val tab = _editorTabState.value
+        if (!tab.mode.needsReverse) return
+        if (tab.reversedFile != null || tab.isReversedFileLoading) return
+
+        _editorTabState.value = tab.copy(isReversedFileLoading = true, reverseFailed = false)
+        reverseJob = viewModelScope.launch {
+            try {
+                val reversed = videoProcessor.ensureReversed(trim.sourceFile, trim.trimStartMs, trim.trimEndMs)
+                _editorTabState.value = _editorTabState.value.copy(
+                    reversedFile = reversed,
+                    isReversedFileLoading = false,
+                )
+            } catch (e: CancellationException) {
+                throw e // never swallow cancellation (Lesson 013)
+            } catch (e: Exception) {
+                // e.g. an imported clip whose codec the device can't tone-map/transcode. Flag the
+                // failure so the editor drops the "Loopifying…" shimmer and offers a retry instead of
+                // hanging forever (the shimmer is gated on reversedFile == null).
+                Log.e("OpenLoopViewModel", "Reverse generation for preview failed", e)
+                _editorTabState.value = _editorTabState.value.copy(
+                    isReversedFileLoading = false,
+                    reverseFailed = true,
+                )
+            }
+        }
+    }
+
+    /**
+     * Save the boomerang in the editor's current direction + speed + look (reps stays hard-wired at 1
+     * — the reps tab was dropped for the Looks tab). Flips to [OpenLoopUiState.Processing]; on success promotes the scratch to a persistent
+     * raw, registers the boomerang, emits [BoomerangEvent.Share] (handing the rendered file to the
+     * share sheet — slice 06) and returns to capture. The render
+     * sources the **scratch** file — the same path the preview reversed — so a reverse-containing mode
+     * hits the cached reversed clip instead of regenerating it (speed is applied per clip at render and
+     * doesn't invalidate that cache). On failure, it emits [BoomerangEvent.Failed] and routes back to
+     * [OpenLoopUiState.BoomerangEditor] with the direction + speed selection intact.
+     */
+    fun saveBoomerang() {
+        val editor = _editorState.value ?: return
+        val scratch = activeScratch ?: return
+        val tab = _editorTabState.value
+        val mode = tab.mode
+
+        _uiState.value = OpenLoopUiState.Processing
+        _renderProgress.value = 0f
+
+        viewModelScope.launch {
+            try {
+                // Promote once and cache it, so a retry after a failed render doesn't create a 2nd raw.
+                val raw = promotedRaw
+                    ?: (videoStorage.promoteScratchToRaw(scratch)?.also { promotedRaw = it }
+                        ?: throw IOException("Failed to promote scratch ${scratch.uuid} to a raw"))
+
+                val output = videoStorage.allocateBoomerangFile(raw.id)
+                videoProcessor.renderBoomerang(
+                    source = scratch.file, // same path the preview reversed → shared reverse cache
+                    trimStartMs = editor.trimStartMs,
+                    trimEndMs = editor.trimEndMs,
+                    mode = mode,
+                    speed = tab.speed,
+                    filter = tab.filter,
+                    repetitions = DEFAULT_REPS,
+                    outputFile = output,
+                ) { fraction -> _renderProgress.value = fraction }
+
+                videoStorage.registerBoomerang(output, raw.id)
+                    ?: throw IOException("Failed to register boomerang ${output.name}")
+
+                val returnToGallery = importedSession // capture before clearEditorSession() resets it
+                videoStorage.discardScratch(scratch)
+                clearEditorSession()
+                loadRecordedVideos()
+                // Hand the rendered file to the share sheet (slice 06). `output` was captured before
+                // clearEditorSession(), so it survives the session reset. The "Saved" snackbar is NOT
+                // emitted here — it's deferred until the share sheet returns (onShareSheetClosed).
+                _events.send(BoomerangEvent.Share(output))
+                // A fresh capture lands back on the camera; an imported clip lands back on the gallery
+                // it was imported from (slice 07). The share sheet pops over whichever screen this is.
+                _uiState.value = if (returnToGallery) {
+                    OpenLoopUiState.Gallery
+                } else {
+                    OpenLoopUiState.ReadyToCapture
+                }
+            } catch (e: CancellationException) {
+                throw e // never swallow cancellation (Lesson 013)
+            } catch (e: IOException) {
+                Log.e("OpenLoopViewModel", "Boomerang save failed (IO)", e)
+                failBackToEditor(scratch)
+            } catch (e: RuntimeException) {
+                // Media3 / MediaCodec surface render failures as runtime exceptions; recover the UI.
+                Log.e("OpenLoopViewModel", "Boomerang render failed", e)
+                failBackToEditor(scratch)
+            }
+        }
+    }
+
+    /**
+     * The share sheet for a just-saved boomerang has returned control (the user shared, canceled, or
+     * backed out — all the same to us). Emit [BoomerangEvent.Saved] so the "Saved — view in gallery"
+     * snackbar shows now that the user is back on the camera. Called by MainActivity from its next
+     * `onResume()` after the chooser dismisses — not `withResumed { }`, which would fire immediately
+     * because the activity is still RESUMED at the moment the chooser is launched (slice 06).
+     */
+    fun onShareSheetClosed() {
+        viewModelScope.launch { _events.send(BoomerangEvent.Saved) }
+    }
+
+    /** Emit [BoomerangEvent.Failed] and route back to the editor, preserving the direction selection. */
+    private suspend fun failBackToEditor(scratch: ScratchCapture) {
+        _events.send(BoomerangEvent.Failed)
+        _uiState.value = OpenLoopUiState.BoomerangEditor(EditorSource.ScratchClip(scratch.uuid))
+    }
+
+    /** Cancel any in-flight reverse generation (editor left or session cleared). */
+    private fun cancelReverseJob() {
+        reverseJob?.cancel()
+        reverseJob = null
+    }
+
+    /** Clear the active editing session (after a save or discard). Does NOT touch on-disk files. */
+    private fun clearEditorSession() {
+        cancelReverseJob()
+        activeScratch = null
+        promotedRaw = null
+        importedSession = false
+        _editorState.value = null
+        _editorTabState.value = EditorTabState()
+        _renderProgress.value = 0f
+    }
+
+    /**
+     * Factory for creating [OpenLoopViewModel] with its repository dependencies.
+     * Used in MainActivity since we don't have a DI framework. Note it takes the
+     * already-constructed repositories (not a Context) — MainActivity bridges
+     * Context → repositories, keeping this Factory and the ViewModel Context-free.
+     */
+    companion object {
+        /** Hard cap on a single burst capture; recording auto-finalizes at this elapsed time. */
+        const val MAX_RECORDING_MS = 30_000L
+
+        /** Elapsed-time emit cadence (~30 fps) for a smooth progress ring without over-emitting. */
+        const val TICK_MS = 33L
+
+        /** Minimum trimmed duration; below this the NEXT action is disabled (slice 02). */
+        const val MIN_TRIM_MS = 400L
+
+        /** Default boomerang config. Direction picker shipped slice 03, speed slider slice 04, Looks
+         *  (filters) slice 05 — the Reps tab was dropped in favor of Looks, so [DEFAULT_REPS] stays
+         *  hard-wired at 1. [DEFAULT_SPEED] is the speed slider's starting value. */
+        const val DEFAULT_SPEED = 2.0f
+        const val DEFAULT_REPS = 1
+
+        /** Playback-speed slider bounds (slice 04); [updateSpeed] clamps to this range. */
+        const val MIN_SPEED = 0.25f
+        const val MAX_SPEED = 3.0f
+
+        /** Max duration of an imported library clip (slice 07); same 30 s ceiling as a capture. */
+        const val IMPORT_MAX_DURATION_MS = MAX_RECORDING_MS
+
+        /**
+         * Grace added to [IMPORT_MAX_DURATION_MS] before rejecting an import, so a clip the user
+         * thinks of as "30 seconds" (often 30.2–30.5 s of actual container duration) isn't rejected
+         * for being a few hundred ms over (slice 07).
+         */
+        const val IMPORT_DURATION_GRACE_MS = 1_000L
+
+        /** Scratch files older than this are pruned at launch (parent D-8); 24 h. */
+        const val STALE_SCRATCH_MAX_AGE_MS = 24L * 60 * 60 * 1_000
+    }
+
+    class Factory(
+        private val userPreferencesRepository: UserPreferencesRepository,
+        private val videoStorage: VideoStorageRepository,
+        private val videoProcessor: VideoProcessor,
+        private val videoImporter: VideoImporter,
+    ) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(OpenLoopViewModel::class.java)) {
+                return OpenLoopViewModel(userPreferencesRepository, videoStorage, videoProcessor, videoImporter) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+        }
+    }
+}

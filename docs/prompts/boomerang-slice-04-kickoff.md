@@ -6,7 +6,7 @@ Copy everything below the line into a fresh Claude Code session with the OpenRan
 
 ## Session Prompt — Implement Boomerang Slice 04
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0.
 
 The editor has a Direction tab and saves boomerangs at a hard-coded 2.0× speed (slices 02–03 shipped). This slice adds the **Speed tab** as the second icon in the bottom tab bar and a horizontal slider that controls both preview playback speed (live) and render speed.
 
@@ -100,7 +100,7 @@ Walk the slice 04 manual QA on emulator + Pixel 10 Pro Fold:
 
 ## Phase 6: Open the PR
 
-- Push the branch to `stozo04/OpenRang`.
+- Push the branch to `stozo04/OpenLoop`.
 - PR title: `Slice 04 — Speed tab`.
 - PR description: acceptance-criteria checklist from `docs/active/boomerang-rollout/04-editor-speed-tab.md` §"Acceptance criteria", each box checked.
 - Attach the screenshot.

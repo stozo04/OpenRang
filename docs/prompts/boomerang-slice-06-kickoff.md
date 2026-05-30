@@ -6,7 +6,7 @@ Copy everything below the line into a fresh Claude Code session with the OpenRan
 
 ## Session Prompt — Implement Boomerang Slice 06
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0.
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0.
 
 The editor is feature-complete (direction + speed + reps + trim, slices 02–05 shipped) and saves rendered boomerangs to internal storage. This slice adds the **single-tap distribution path** — Save now pops the Android share sheet on the new MP4, and the user lands back on the camera with a "View in gallery" snackbar.
 
@@ -103,7 +103,7 @@ Walk the slice 06 manual QA on emulator + Pixel 10 Pro Fold:
 
 ## Phase 6: Open the PR
 
-- Push to `stozo04/OpenRang`.
+- Push to `stozo04/OpenLoop`.
 - PR title: `Slice 06 — Share sheet + return-to-camera`.
 - PR description: acceptance-criteria checklist from `docs/active/boomerang-rollout/06-share-sheet-and-return.md`, each box checked.
 - Attach the screenshot.

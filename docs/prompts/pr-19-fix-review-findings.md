@@ -6,13 +6,13 @@ This prompt is a **finding-specific** companion to `docs/prompts/PR-FEEDBACK-RES
 
 > **Deliberately out of scope:** the review's REC about the "Loopify" no-op button (`PreviewScreen.kt`) is **intentional** — it's a placeholder that slice 02 repoints to the Trim screen (`docs/prompts/boomerang-slice-02-kickoff.md` → `02-auto-route-trim-and-default-save.md`, which routes `Finalize` success to `Trim(ScratchClip)`). **Do not change it.** Acknowledge it as intentional/deferred in the PR response comment; do not "fix" it.
 
-> Source review comment: <https://github.com/stozo04/OpenRang/pull/19#issuecomment-4569900450>
+> Source review comment: <https://github.com/stozo04/OpenLoop/pull/19#issuecomment-4569900450>
 
 ---
 
 ## Session Prompt — Fix the PR #19 review findings (with tests)
 
-You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenRang`. Owner: Steven Gates (@stozo04). Apache 2.0. You are on branch `feature/boomerang-slice-01-variable-length` (PR #19).
+You are working on **OpenRang** — an open-source Android camera app (Kotlin/Jetpack Compose) for creating speed-controlled video loops ("Boomerangs"). Repo: `stozo04/OpenLoop`. Owner: Steven Gates (@stozo04). Apache 2.0. You are on branch `feature/boomerang-slice-01-variable-length` (PR #19).
 
 ### Critical Rule — Do Not Trust Your Training Data
 

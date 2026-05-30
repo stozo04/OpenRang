@@ -123,7 +123,7 @@ locally before opening/merging a PR, and the merge policy requires it to be clea
 
 ---
 
-## Tier 3 — lightweight OSS fallback for environments without Android Studio ([Issue #21](https://github.com/stozo04/OpenRang/issues/21))
+## Tier 3 — lightweight OSS fallback for environments without Android Studio ([Issue #21](https://github.com/stozo04/OpenLoop/issues/21))
 
 When the reviewer runs somewhere without Android Studio (a cloud runner / CI), Engine 2 can't
 run. Tier 3 is a fast, headless, **Node-based** approximation of Engine 2's high-value subset. It
@@ -166,7 +166,7 @@ npx --yes markdownlint-cli2 "**/*.md"
 
 ### Why detekt was deferred (not in this tier yet)
 
-[Issue #21](https://github.com/stozo04/OpenRang/issues/21) originally proposed **detekt** for the
+[Issue #21](https://github.com/stozo04/OpenLoop/issues/21) originally proposed **detekt** for the
 Kotlin-redundancy class. DD finding: **stable detekt (1.23.x) does not support Kotlin 2.3.x** —
 only [detekt 2.0.0-alpha](https://detekt.dev/docs/introduction/compatibility/) does, and this
 project is on Kotlin 2.3.21. Taking an *alpha* static-analysis dependency into the build for a
@@ -181,9 +181,9 @@ broken references on `main`** (not introduced by this work):
 
 - `README.md` and `CLAUDE.md` linked to **`docs/android-16/README.md`**, which existed on no
   branch — the hub had been renamed to `docs/completed/android-16/` against its documented
-  evergreen convention. **Fixed in [#23](https://github.com/stozo04/OpenRang/pull/23)** (restored to root).
+  evergreen convention. **Fixed in [#23](https://github.com/stozo04/OpenLoop/pull/23)** (restored to root).
 - `README.md` linked to a **`LICENSE`** file that did not exist (the project states Apache 2.0).
-  **Fixed in [#23](https://github.com/stozo04/OpenRang/pull/23)** (added verbatim Apache 2.0 text).
+  **Fixed in [#23](https://github.com/stozo04/OpenLoop/pull/23)** (added verbatim Apache 2.0 text).
 
 ### Hosting Tier 3 — GitHub Actions (active)
 
