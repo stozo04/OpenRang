@@ -187,6 +187,40 @@ above grants share-time access without copying or moving them.
 - Test on Pixel 10 Pro Fold + an emulator with the Android system share UI.
 - Screenshot of the share sheet (top half) attached to the PR.
 
+## Implementation notes (as built)
+
+This doc was written before slices 04/05 merged; two prescriptions were superseded during build,
+both deliberately:
+
+- **Reused the existing `BoomerangEvent` `Channel` instead of a new `UiEffect` `SharedFlow`.** By
+  slice 06 the one-shot event channel and the "Saved — view in gallery" snackbar (with the `View`
+  action) already existed and worked. Adding a parallel `SharedFlow` would have been churn for no
+  user-visible gain, and a `Channel` is the more robust choice for one-shot events (it buffers a
+  miss; a `SharedFlow` can drop one if nobody is collecting at that instant). Added
+  `BoomerangEvent.Share(file)` (render success hands the rendered MP4 to the sheet) and
+  `OpenRangViewModel.onShareSheetClosed()` (emits the deferred `Saved`).
+- **Deferred the snackbar via the activity's next `onResume()`, not `lifecycle.withResumed { }`.**
+  Called synchronously right after `startActivity(chooser)`, the activity is still `RESUMED`
+  (the chooser hasn't taken over yet), so `withResumed` would run its block *immediately* — firing
+  the snackbar before the chooser appears, the exact thing the deferral exists to prevent.
+  `MainActivity` instead sets `awaitingShareReturn` when launching the sheet and consumes it on the
+  next `onResume()`, so the snackbar shows when the user is genuinely back on the camera.
+- **Snackbar duration set to `SnackbarDuration.Short`.** Material3 defaults a snackbar *with an
+  action label* to `Indefinite`; the explicit `Short` honors the "auto-dismiss at 4 s" requirement
+  while keeping the `View` action.
+- **No new gradle dependency.** `FileProvider` comes from `androidx.core`; the share-intent shape
+  and provider scope are covered by an instrumented `ShareBoomerangTest` using the real
+  `FileProvider`/`Intent`, so `espresso-intents` was not needed.
+- **`awaitingShareReturn` survives recreation.** The deferred-share flag is persisted in
+  `onSaveInstanceState` and restored in `onCreate`, so a rotation (orientation is unlocked at target
+  36 — see ANDROID_STANDARDS §11) or process death while the chooser is on top doesn't drop the
+  "Saved" snackbar on the next `onResume()`.
+- **User-facing strings extracted to `strings.xml`.** The chooser title (`share_chooser_title`),
+  share subject (`share_subject`), and the three post-save snackbar strings (`snackbar_saved`,
+  `snackbar_view_action`, `snackbar_save_failed`) are resources rather than literals, so they
+  localize. `buildBoomerangShareIntent(uri, subject)` takes the subject as a parameter to stay
+  Context-free (and unit-testable).
+
 ## Acceptance criteria
 
 - [ ] `assembleDebug` + `assembleRelease`: BUILD SUCCESSFUL, exit 0, zero `e:`.
