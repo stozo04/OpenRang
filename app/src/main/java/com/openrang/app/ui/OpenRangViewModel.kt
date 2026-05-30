@@ -342,7 +342,11 @@ class OpenRangViewModel(
             when {
                 // Unreadable duration → we can't enforce the ≤30 s rule, so don't import it.
                 durationMs <= 0L -> failImport()
-                // Small grace so a clip the user thinks is "30 s" (often 30.2–30.5 s) isn't rejected.
+                // Enforce the dialog's advertised "up to 30 s" cap LENIENTLY: the small grace
+                // (IMPORT_DURATION_GRACE_MS) accepts a clip the user thinks is "30 s" but whose
+                // container duration reads 30.2–30.5 s. The grace only ever makes us *more* permissive
+                // than the promise, never stricter — so no user is surprised by a rejection, and a clip
+                // comfortably past 30 s is still rejected, exactly matching the "up to 30 seconds" copy.
                 durationMs > IMPORT_MAX_DURATION_MS + IMPORT_DURATION_GRACE_MS -> warnTooLong()
                 else -> {
                     val scratch = videoStorage.createScratchCapture()
